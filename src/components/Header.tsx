@@ -22,7 +22,7 @@ export function Header() {
   })
 
   const displayName = employee?.name || (employee?.first_name ? `${employee.first_name} ${employee.last_name || ''}`.trim() : null) || (employee?.employeeId ? `Admin (${employee.employeeId})` : 'Admin')
-  const department = employee?.department || employee?.designation || 'System HQ'
+  const department = employee?.department || employee?.designation || ''
 
   return (
     <header className="fixed top-0 left-72 right-0 h-20 bg-white/75 backdrop-blur-xl border-b border-slate-200/70 z-40 flex items-center justify-between px-8 transition-all">

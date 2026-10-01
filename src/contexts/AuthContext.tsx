@@ -101,8 +101,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const response: SkyTrackLoginResponse = await loginWithSkyTrack(employeeId, password)
 
       // Handle failed response from SkyTrack API
-      if (!response || response.success === false) {
-        const code = response?.error || 'auth_failed'
+      if (!response || response.success === false || response.error || response.code === 'BOOT_ERROR') {
+        const code = response?.code || response?.error || 'auth_failed'
         const msg = response?.message || 'Invalid Employee ID or password.'
         return { success: false, error: msg, code }
       }

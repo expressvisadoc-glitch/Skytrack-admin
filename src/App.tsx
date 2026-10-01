@@ -7,6 +7,7 @@ import { Attendance } from './components/Attendance'
 import { LeaveManagement } from './components/LeaveManagement'
 import { PublicHolidays } from './components/PublicHolidays'
 import { Settings } from './components/Settings'
+import { Organization } from './components/Organization'
 import { Login } from './components/Login'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { useAuth } from './contexts/AuthContext'
@@ -14,7 +15,7 @@ import './index.css'
 
 function App() {
   const { session, isLoading } = useAuth()
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leave-management' | 'public-holidays' | 'settings' | string>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leave-management' | 'public-holidays' | 'settings' | 'organization' | string>('dashboard')
 
   if (isLoading) {
     return (
@@ -51,6 +52,8 @@ function App() {
             <PublicHolidays />
           ) : activeTab === 'settings' ? (
             <Settings />
+          ) : activeTab === 'organization' ? (
+            <Organization />
           ) : (
             <div className="pt-28 px-8 flex flex-col items-center justify-center min-h-[60vh] text-center">
               <div className="w-16 h-16 rounded-3xl bg-red-50 text-red-500 flex items-center justify-center mb-4">

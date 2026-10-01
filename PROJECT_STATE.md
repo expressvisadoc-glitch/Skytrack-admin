@@ -201,3 +201,16 @@ Whenever modifications, additions, or refactors are made to the codebase:
   - Established `PROJECT_STATE.md` documenting all active components, layouts, APIs, and authorization layers.
   - Audited current application modules: Authentication (`AuthContext`, `Login`, `ProtectedRoute`), Layout (`Sidebar`, `Header`), Dashboard, Employees & Details (`Employees`, `EmployeeDetails`), Daily Attendance (`Attendance`), Leave Management (`LeaveManagement`), and Settings (`Settings`).
   - Documented Supabase integration endpoints, database migrations, and build configurations.
+
+### [2026-09-29] — Active Hours & Break Tracking Update
+- **Author**: Antigravity Assistant & User
+- **Scope**: Backend Database Schema, Supabase Edge Function, Admin Portal, and Android Client
+- **Details**:
+  - **Database & RLS**: Created migration `20260101000002_attendance_breaks.sql` adding `worked_minutes` and `break_minutes` (integer minutes) to `attendance`, and creating `attendance_breaks` table with foreign key cascade to `attendance(id)`, active break indexes, and RLS policies for authenticated employees and admins.
+  - **Edge Function (`skytrack-api`)**: Extended `edge_function.ts` with authoritative handlers for `start_break`, `end_break` (and `resume_work` alias), updated `start_work`, updated `end_work` (`worked_minutes = presence_minutes - break_minutes`), updated `attendance_today` (reflects live break status and authoritative break durations), and updated `attendance_monthly` to calculate `SUM(worked_minutes)` strictly excluding breaks, exposing `totalWorkedMinutes`, `totalBreakMinutes`, and `totalHours`.
+  - **Admin Portal (`skytrack-admin`)**: Extended API client interfaces (`FullAttendanceRecord`, `AttendanceHistoryItem`) to map `workedMinutes`, `breakMinutes`, and formatted active duration strings.
+  - **Android Client (`SkyTrack_01`)**: Updated `ApiModels.kt`, `SkyTrackApi.kt`, `AttendanceRepository.kt`, `HomeViewModel.kt`, `HomeScreen.kt`, `MonthlyStatisticsViewModel.kt`, and `MonthlyStatisticsScreen.kt` to enforce valid break states, authoritative backend durations, disabled Check-Out while on break, and display "Total Active Hours" formatted as `Xh YYm` (e.g. `24h 15m`).
+
+### Edge Function Notes
+- The Supabase Edge function `skytrack-api` handles attendance formatting. The `hours` field in the API response is formatted as `Xh YYm` (e.g. `8h 30m`), which differs from `HH:MM`. Android clients must parse this correctly.
+- Active working hours are calculated as `Total Presence Time - Total Break Time`, stored as integer `worked_minutes` and `break_minutes`.

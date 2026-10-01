@@ -1,0 +1,671 @@
+PROJECT: SkyTrack Admin Portal
+
+TASK:
+Update the existing SkyTrack Admin Portal to integrate the new Leave Management backend/API changes.
+
+IMPORTANT:
+DO NOT make any UI/UX redesign.
+
+The existing Stitch-generated UI is already approved.
+
+Do NOT:
+- change colors
+- change typography
+- change spacing
+- change layouts
+- change cards
+- change tables
+- change navigation
+- change icons
+- add unnecessary UI elements
+- redesign existing leave screens
+
+Only modify the functionality, API integration, TypeScript models, data mapping, state management and backend communication required for the new leave-management system.
+
+==================================================
+1. BACKEND LEAVE RULES
+==================================================
+
+The backend is now the source of truth for all leave calculations.
+
+Rules:
+
+1. Monday-Saturday are working days.
+2. Sunday is excluded from leave-day calculation.
+3. Casual Leave accrues automatically.
+4. Sick Leave accrues automatically according to the backend accrual system.
+5. Employees can request leave even if their paid balance is insufficient.
+6. Approval consumes available paid leave first.
+7. Any remaining approved leave becomes LOP.
+8. LOP does not reduce the paid leave balance.
+9. LOP is NOT a separate leave type.
+10. Leave type remains:
+    - casual
+    - sick
+
+Example:
+
+Employee balance:
+Casual = 2 days
+
+Leave request:
+Monday-Friday = 5 working days
+
+After approval:
+
+leaveDays = 5
+paidLeaveDays = 2
+lopDays = 3
+
+Remaining balance = 0.
+
+DO NOT reproduce this calculation in the frontend.
+
+The backend/database performs this calculation.
+
+==================================================
+2. API ENDPOINT
+==================================================
+
+Continue using the existing SkyTrack API client and existing Edge Function endpoint.
+
+Do NOT create a second API client.
+
+Existing backend:
+
+/functions/v1/skytrack-api
+
+Use the existing authentication/session mechanism.
+
+==================================================
+3. API ACTION MAPPING
+==================================================
+
+Update the existing SkyTrack API client/action mapping.
+
+--------------------------------------------------
+3.1 Leave Request
+--------------------------------------------------
+
+Existing frontend leave-submit functionality should now call:
+
+action = "leave_submit"
+
+Request:
+
+{
+  action: "leave_submit",
+  fromDate: string,
+  toDate: string,
+  leaveType: "casual" | "sick",
+  reason?: string
+}
+
+The frontend must NOT calculate:
+
+- paid leave
+- LOP
+- balance deduction
+
+The backend returns the authoritative result.
+
+Map response:
+
+{
+  success: true,
+  leave: {
+    id,
+    requestId,
+    employeeId,
+    fromDate,
+    toDate,
+    leaveType,
+    reason,
+    leaveDays,
+    paidLeaveDays,
+    lopDays,
+    status,
+    approvedBy,
+    approvedAt,
+    managerComment,
+    createdAt,
+    updatedAt
+  }
+}
+
+--------------------------------------------------
+3.2 Leave History
+--------------------------------------------------
+
+Use:
+
+action = "leave_history"
+
+Map the response into the existing leave-management data model.
+
+New fields that MUST be mapped:
+
+leaveDays
+paidLeaveDays
+lopDays
+
+Existing fields continue to be mapped:
+
+requestId
+employeeId
+fromDate
+toDate
+leaveType
+reason
+status
+approvedBy
+approvedAt
+managerComment
+createdAt
+updatedAt
+
+Do not create a second leave-history model if an existing model can be extended.
+
+--------------------------------------------------
+3.3 Leave Balance
+--------------------------------------------------
+
+Add API support for:
+
+action = "leave_balance"
+
+Request:
+
+{
+  action: "leave_balance"
+}
+
+Response:
+
+{
+  success: true,
+  balance: {
+    casual: {
+      allocated,
+      adjusted,
+      used,
+      balance
+    },
+    sick: {
+      allocated,
+      adjusted,
+      used,
+      balance
+    }
+  }
+}
+
+Map these values into the existing employee leave balance state/model.
+
+The UI should continue using the existing design.
+
+Do not calculate:
+
+balance = allocated + adjusted - used
+
+in multiple frontend components.
+
+Use the backend's `balance` value.
+
+--------------------------------------------------
+3.4 Approve Leave
+--------------------------------------------------
+
+Add API support:
+
+action = "approve_leave"
+
+Request:
+
+{
+  action: "approve_leave",
+  requestId: string,
+  managerComment?: string
+}
+
+The authenticated admin/super_admin identity is determined by the backend.
+
+Do NOT send a manually selected approver ID unless the existing API architecture specifically requires it.
+
+The backend calls:
+
+approve_leave_request
+
+The frontend must NOT calculate:
+
+paidLeaveDays
+lopDays
+balance deduction
+
+After successful approval:
+
+1. Update/refresh the leave request.
+2. Refresh employee leave balance.
+3. Refresh the leave-management list if required.
+4. Show the existing success feedback mechanism.
+
+--------------------------------------------------
+3.5 Reject Leave
+--------------------------------------------------
+
+Add API support:
+
+action = "reject_leave"
+
+Request:
+
+{
+  action: "reject_leave",
+  requestId: string,
+  managerComment?: string
+}
+
+The backend calls:
+
+reject_leave_request
+
+After successful rejection:
+
+1. Update/refresh the leave request.
+2. Refresh leave-management list.
+
+A rejected leave must not deduct leave balance.
+
+It must not create LOP.
+
+--------------------------------------------------
+3.6 Manual Leave Balance Adjustment
+--------------------------------------------------
+
+Add API support:
+
+action = "leave_balance_adjustment"
+
+Request:
+
+{
+  action: "leave_balance_adjustment",
+  employeeId: string,
+  leaveType: "casual" | "sick",
+  days: number,
+  reason: string
+}
+
+Examples:
+
+Add 2 days:
+
+days = 2
+
+Remove 1 day:
+
+days = -1
+
+The backend is responsible for updating:
+
+adjusted_days
+
+and creating:
+
+leave_balance_transactions
+
+with:
+
+transaction_type = "manual_adjustment"
+
+Do NOT directly update the balance from the frontend.
+
+Do NOT directly modify:
+
+allocated_days
+used_days
+balance_days
+
+from the Admin Portal.
+
+==================================================
+4. EXISTING LEAVE MANAGEMENT SCREEN
+==================================================
+
+Keep the existing UI exactly as it is.
+
+Only update the data mapping so the existing table/cards/details can use:
+
+leaveDays
+paidLeaveDays
+lopDays
+
+Where the existing UI already has appropriate places for leave information, map the new values into those existing components.
+
+Do not redesign the table.
+
+Do not add a new LOP section unless the existing design already has an appropriate location.
+
+If the existing design has a leave-details view, use:
+
+Total Leave Days
+Paid Leave Days
+LOP Days
+
+using the existing visual components.
+
+==================================================
+5. APPROVAL LOGIC
+==================================================
+
+When the admin clicks Approve:
+
+Frontend:
+    -> call approve_leave
+
+Backend:
+    -> validate admin role
+    -> find pending leave
+    -> calculate working days
+    -> read employee balance
+    -> consume available paid leave
+    -> calculate LOP
+    -> update leave
+    -> update used_days
+    -> create transaction
+
+Frontend:
+    -> receive authoritative response
+    -> update state
+    -> refresh relevant data
+
+Do NOT duplicate any of the backend calculation logic in React/TypeScript.
+
+==================================================
+6. REJECTION LOGIC
+==================================================
+
+When admin clicks Reject:
+
+Frontend:
+    -> call reject_leave
+
+Backend:
+    -> update request status to rejected
+
+Frontend:
+    -> update state
+    -> refresh data
+
+No leave balance calculation is required.
+
+==================================================
+7. EMPLOYEE LEAVE BALANCE
+==================================================
+
+Where the Admin Portal displays employee leave balances, map:
+
+Casual:
+allocated
+adjusted
+used
+balance
+
+Sick:
+allocated
+adjusted
+used
+balance
+
+Use the API response directly.
+
+Do not infer balance from leave history.
+
+Do not calculate balance from approved requests.
+
+The employee_leave_balances table is the source of truth.
+
+==================================================
+8. MANUAL ADJUSTMENT
+==================================================
+
+Connect the EXISTING Admin UI control for leave adjustment to:
+
+leave_balance_adjustment
+
+The UI should send:
+
+employeeId
+leaveType
+days
+reason
+
+Do not change the existing UI.
+
+If the existing adjustment UI currently expects a "new balance", convert its behavior internally to an adjustment amount only if necessary.
+
+Preferred behavior:
+
++2 = add 2 days
+-1 = remove 1 day
+
+Do not silently overwrite the entire balance.
+
+==================================================
+9. ROLE SECURITY
+==================================================
+
+The Admin Portal must not rely only on frontend role checks.
+
+Backend authorization is authoritative.
+
+Expected roles:
+
+employee
+admin
+super_admin
+
+Only:
+
+admin
+super_admin
+
+can:
+
+approve leave
+reject leave
+adjust employee leave balances
+view/administer other employees' leave data
+
+Normal employees must not be able to perform these operations.
+
+If the backend returns an unauthorized response, display it using the existing error handling mechanism.
+
+==================================================
+10. TYPESCRIPT MODELS
+==================================================
+
+Update existing TypeScript interfaces/models rather than creating duplicate types.
+
+Leave model must support:
+
+interface Leave {
+  id: string
+  requestId: string
+  employeeId: string
+  fromDate: string
+  toDate: string
+  leaveType: "casual" | "sick"
+  reason?: string | null
+
+  leaveDays: number
+  paidLeaveDays: number
+  lopDays: number
+
+  status: string
+  approvedBy?: string | null
+  approvedAt?: string | null
+  managerComment?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+Leave balance model:
+
+interface LeaveBalance {
+  allocated: number
+  adjusted: number
+  used: number
+  balance: number
+}
+
+Employee leave balance:
+
+interface EmployeeLeaveBalance {
+  casual: LeaveBalance
+  sick: LeaveBalance
+}
+
+Use the project's existing naming conventions if they differ.
+
+==================================================
+11. ERROR HANDLING
+==================================================
+
+Handle these backend errors:
+
+Leave end date cannot be before start date
+
+Selected dates contain no working days
+
+Leave dates overlap an existing leave request
+
+Invalid leave type
+
+Leave request not found or is no longer pending
+
+You are not authorized to perform this action
+
+Do not expose raw Supabase/database errors unnecessarily.
+
+Use the existing Admin Portal notification/error system.
+
+==================================================
+12. REFRESH BEHAVIOR
+==================================================
+
+After APPROVE:
+
+Refresh:
+- leave request
+- leave list
+- employee leave balance where displayed
+
+After REJECT:
+
+Refresh:
+- leave request
+- leave list
+
+After BALANCE ADJUSTMENT:
+
+Refresh:
+- employee balance
+- relevant employee data
+- transaction data if the screen displays it
+
+Do not require a full page reload.
+
+==================================================
+13. DO NOT MODIFY
+==================================================
+
+Do NOT modify existing:
+
+attendance API
+attendance calculations
+start work
+end work
+break functionality
+monthly attendance
+public holidays
+authentication flow
+dashboard calculations
+
+unless required only for API compatibility.
+
+The leave implementation must remain isolated.
+
+==================================================
+14. API CLIENT IMPLEMENTATION
+==================================================
+
+Inspect the existing API client first.
+
+Do not create another fetch wrapper if one already exists.
+
+Add methods/functions similar to the existing architecture:
+
+getLeaveHistory()
+getLeaveBalance()
+submitLeave()
+approveLeave()
+rejectLeave()
+adjustLeaveBalance()
+
+Use the existing authenticated request mechanism.
+
+Use the existing Edge Function URL.
+
+==================================================
+15. VERIFICATION
+==================================================
+
+After implementation test:
+
+1. Get leave balance.
+2. Load leave history.
+3. Submit leave.
+4. Approve leave with sufficient balance.
+5. Approve leave with insufficient balance.
+6. Verify LOP is returned by backend.
+7. Reject leave.
+8. Adjust leave balance + days.
+9. Adjust leave balance - days.
+10. Verify unauthorized employee cannot perform admin operations.
+11. Verify existing attendance still works.
+
+IMPORTANT FINAL REQUIREMENT:
+
+Do not change the existing UI.
+
+This task is strictly:
+
+API integration
+API mapping
+Type/model updates
+state management
+leave functionality
+authorization handling
+data refresh
+error handling
+
+Keep the existing Stitch UI exactly as it is.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-30T13:43:51+05:30.
+
+The user's current state is as follows:
+Active Document: /Volumes/Excelsior/SkyTrack/skytrack-admin/src/lib/api.ts (LANGUAGE_TYPESCRIPT)
+Cursor is on line: 530
+Other open documents:
+- /Volumes/Excelsior/SkyTrack/SkyTrack_01/app/src/main/java/com/skypass/skytrack/ui/monthly/TimesheetPdfViewerDialog.kt (LANGUAGE_KOTLIN)
+- /Volumes/Excelsior/SkyTrack/SkyTrack_01/app/src/main/java/com/skypass/skytrack/ui/monthly/MonthlyStatisticsScreen.kt (LANGUAGE_KOTLIN)
+- /Volumes/Excelsior/SkyTrack/skytrack-admin/src/lib/api.ts (LANGUAGE_TYPESCRIPT)
+Running terminal commands:
+- npm run dev (in /Users/amal/Documents/Apps_team/Flames of Al yamama/flames-next, running for 3h11m35s)
+- npm run dev (in /Volumes/Excelsior/skytrack/skytrack-admin, running for 2h6m33s)
+</ADDITIONAL_METADATA>
+<USER_SETTINGS_CHANGE>
+The user changed setting `Model Selection` from Gemini 3.8 Flash (Medium) to Gemini 3.1 Pro (High). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.
+</USER_SETTINGS_CHANGE>

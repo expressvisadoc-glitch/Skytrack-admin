@@ -11,6 +11,7 @@ export function Sidebar({ activeTab, onSelectTab }: SidebarProps) {
     { id: 'leave-management', label: 'Leave Management', icon: 'event_busy', badge: '8', badgeColor: 'bg-red-100 text-red-600' },
     { id: 'public-holidays', label: 'Public Holidays', icon: 'event_available' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
+    { id: 'organization', label: 'Organization', icon: 'corporate_fare' },
   ]
 
   return (

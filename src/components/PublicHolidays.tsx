@@ -493,13 +493,11 @@ const INITIAL_HOLIDAYS: PublicHolidayItem[] = [
   },
 ]
 
-const LOCAL_STORAGE_KEY = 'skytrack_admin_public_holidays_2026'
-
 export function PublicHolidays() {
   const currentYear = new Date().getFullYear()
 
   const [holidays, setHolidays] = useState<PublicHolidayItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const [_loading, setLoading] = useState(true)
 
   const [activeTab, setActiveTab] = useState<
     'all' | 'gazetted' | 'restricted' | 'regional' | 'matrix'

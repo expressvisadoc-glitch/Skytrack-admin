@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import {
   getLeaveSubmissions,
-  updateLeaveStatus,
+  approveLeave,
+  rejectLeave,
   type LeaveSubmissionRecord,
 } from '../lib/api'
 
@@ -73,10 +74,10 @@ export function LeaveManagement() {
     if (!token) return
     setIsUpdating(id)
     try {
-      await updateLeaveStatus(token, id, 'approved')
-      setSubmissions((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, status: 'Approved' } : item))
-      )
+      await approveLeave(token, id)
+      // Since it's updated via Edge Function, let's refresh all submissions
+      // so we get the accurate backend state (e.g. lopDays, etc.)
+      await loadSubmissions()
     } catch (err: any) {
       console.error('Error approving leave:', err)
       alert(err.message || 'Failed to approve leave request.')
@@ -89,10 +90,8 @@ export function LeaveManagement() {
     if (!token) return
     setIsUpdating(id)
     try {
-      await updateLeaveStatus(token, id, 'rejected')
-      setSubmissions((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, status: 'Rejected' } : item))
-      )
+      await rejectLeave(token, id)
+      await loadSubmissions()
     } catch (err: any) {
       console.error('Error rejecting leave:', err)
       alert(err.message || 'Failed to reject leave request.')
@@ -596,6 +595,34 @@ export function LeaveManagement() {
                       {selectedItem.duration}
                     </span>
                   </div>
+
+                  {selectedItem.status !== 'Pending' && (
+                    <>
+                      <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                        <div className="flex items-center gap-2 text-slate-500 text-xs">
+                          <span className="material-symbols-outlined text-[18px]">calendar_today</span>
+                          <span>Total Leave Days</span>
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">{selectedItem.leaveDays ?? '—'}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                        <div className="flex items-center gap-2 text-slate-500 text-xs">
+                          <span className="material-symbols-outlined text-[18px]">task_alt</span>
+                          <span>Paid Leave Days</span>
+                        </div>
+                        <span className="text-xs font-bold text-slate-800">{selectedItem.paidLeaveDays ?? '—'}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                        <div className="flex items-center gap-2 text-slate-500 text-xs">
+                          <span className="material-symbols-outlined text-[18px]">warning</span>
+                          <span>LOP Days</span>
+                        </div>
+                        <span className="text-xs font-bold text-rose-600">{selectedItem.lopDays ?? '—'}</span>
+                      </div>
+                    </>
+                  )}
 
                   {/* Reason Box */}
                   <div className="p-3.5 rounded-2xl bg-slate-50/80 border border-slate-100 flex flex-col gap-1">

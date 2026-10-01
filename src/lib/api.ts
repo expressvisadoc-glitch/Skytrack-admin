@@ -37,12 +37,16 @@ export interface SkyTrackEmployee {
   profile_photo_url?: string
   created_at?: string
   updated_at?: string
+  reporting_manager_id?: string | null
+  department_id?: string | null
+  work_shift_id?: string | null
   [key: string]: any
 }
 
 export interface SkyTrackLoginResponse {
   success: boolean
   message?: string
+  code?: string
   session?: {
     token?: string
     accessToken?: string
@@ -135,6 +139,39 @@ export interface DashboardData {
   recentActivity: DashboardRecentActivity[]
 }
 
+export interface Department {
+  id: string
+  department_name: string
+  department_code?: string | null
+  description?: string | null
+  status: string
+}
+
+export interface WorkShift {
+  id: string
+  shift_name: string
+  shift_code?: string | null
+  start_time: string
+  end_time: string
+  break_minutes: number
+  working_minutes: number
+  status: string
+}
+
+export interface OrganizationManager {
+  id: string
+  employee_id: string
+  name: string
+  role: string
+  status: string
+}
+
+export interface OrganizationData {
+  departments: Department[]
+  work_shifts: WorkShift[]
+  managers: OrganizationManager[]
+}
+
 /**
  * Sends a login request to the existing SkyTrack Edge Function
  */
@@ -161,6 +198,14 @@ export async function loginWithSkyTrack(
     data = await response.json()
   } catch (err) {
     throw new Error('Invalid JSON response from SkyTrack authentication server.')
+  }
+
+  if (!response.ok && data) {
+    return { 
+      success: false, 
+      error: data.code || data.error || 'http_error', 
+      message: data.message || data.msg || 'Authentication failed.' 
+    }
   }
 
   return data as SkyTrackLoginResponse
@@ -195,6 +240,41 @@ async function fetchSupabaseRest<T = any>(
   }
 
   return response.json()
+}
+
+/**
+ * Performs authenticated REST PATCH queries against Supabase
+ */
+async function patchSupabaseRest<T = any>(
+  path: string,
+  body: any,
+  token?: string
+): Promise<T> {
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_ANON_KEY,
+    'Content-Type': 'application/json',
+  }
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(`${SUPABASE_REST_URL}/${path}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('SESSION_EXPIRED')
+    }
+    throw new Error(`Supabase query failed: ${response.statusText}`)
+  }
+
+  if (response.status === 204) return {} as T
+  const text = await response.text()
+  return text ? JSON.parse(text) : ({} as T)
 }
 
 /**
@@ -243,6 +323,86 @@ function formatOperationalDate(d: Date): string {
     month: 'short',
     year: 'numeric',
   })
+}
+
+export async function getOrganizationData(token: string): Promise<OrganizationData> {
+  const payload = { action: 'organization_data' }
+  const response = await fetch(SKYTRACK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(payload),
+  })
+
+  let data: any
+  try {
+    data = await response.json()
+  } catch (err) {
+    throw new Error('Invalid JSON response.')
+  }
+
+  if (!response.ok || !data.success) {
+    if (response.status === 401 || response.status === 403 || data.error === 'invalid_session') {
+      throw new Error('SESSION_EXPIRED')
+    }
+    throw new Error(data.message || 'Failed to load organization data.')
+  }
+  return data as OrganizationData
+}
+
+export async function updateEmployeeOrganization(
+  token: string,
+  employeeId: string,
+  reportingManagerId: string | null,
+  departmentId: string | null,
+  workShiftId: string | null
+): Promise<{ success: boolean; message?: string }> {
+  const payload = {
+    action: 'update_employee_organization',
+    employeeId,
+    reportingManagerId,
+    departmentId,
+    workShiftId
+  }
+  const response = await fetch(SKYTRACK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(payload),
+  })
+
+  let data: any
+  try {
+    data = await response.json()
+  } catch (err) {
+    throw new Error('Invalid JSON response.')
+  }
+
+  if (!response.ok || !data.success) {
+    if (response.status === 401 || response.status === 403 || data.error === 'invalid_session') {
+      throw new Error('SESSION_EXPIRED')
+    }
+    throw new Error(data.message || 'Failed to update organization data.')
+  }
+  return data
+}
+
+export async function updateWorkShift(
+  token: string,
+  shiftId: string,
+  startTime: string,
+  endTime: string,
+  workingMinutes: number
+) {
+  return patchSupabaseRest(`work_shifts?id=eq.${shiftId}`, {
+    start_time: startTime,
+    end_time: endTime,
+    working_minutes: workingMinutes
+  }, token)
 }
 
 /**
@@ -526,6 +686,9 @@ export interface EmployeeDirectoryItem {
   }
   accountStatus: 'Active' | 'Suspended' | 'Pending'
   filterCategory: 'present' | 'leave' | 'absent'
+  reportingManagerId?: string | null
+  departmentId?: string | null
+  workShiftId?: string | null
 }
 
 export interface AttendanceHistoryItem {
@@ -535,6 +698,8 @@ export interface AttendanceHistoryItem {
   endTime: string
   status: 'Present' | 'Week Off' | 'Late' | 'Half Day' | 'Leave' | 'Absent'
   hours?: string
+  workedMinutes?: number | null
+  breakMinutes?: number | null
 }
 
 export interface LeaveHistoryItem {
@@ -675,6 +840,9 @@ export async function getEmployeesDirectory(
       leaveStatus: leaveStatusObj,
       accountStatus,
       filterCategory,
+      reportingManagerId: emp.reporting_manager_id || null,
+      departmentId: emp.department_id || null,
+      workShiftId: emp.work_shift_id || null,
     }
   })
 }
@@ -713,12 +881,22 @@ export async function getEmployeeHistory(
     else if (rawStatus === 'leave') status = 'Leave'
     else if (rawStatus === 'absent') status = 'Absent'
 
+    let hours: string | undefined
+    if (att.worked_minutes != null) {
+      const h = Math.floor(att.worked_minutes / 60)
+      const m = att.worked_minutes % 60
+      hours = `${h}h ${String(m).padStart(2, '0')}m`
+    }
+
     return {
       id: att.id,
       date: formatDate(att.attendance_date),
       startTime: formatTime(att.check_in),
       endTime: formatTime(att.check_out),
       status,
+      hours,
+      workedMinutes: att.worked_minutes ?? null,
+      breakMinutes: att.break_minutes ?? null,
     }
   })
 
@@ -759,6 +937,9 @@ export interface FullAttendanceRecord {
   startWork: string
   endWork: string
   status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave'
+  workedMinutes?: number | null
+  breakMinutes?: number | null
+  activeHours?: string
   history: {
     date: string
     time: string
@@ -896,6 +1077,13 @@ export async function getDailyAttendance(
           .toUpperCase()
       : 'SK'
 
+    let activeHours: string | undefined
+    if (attRecord?.worked_minutes != null) {
+      const h = Math.floor(attRecord.worked_minutes / 60)
+      const m = attRecord.worked_minutes % 60
+      activeHours = `${h}h ${String(m).padStart(2, '0')}m`
+    }
+
     return {
       id: attRecord?.id || emp.id || String(Math.random()),
       employeeDbId: emp.id || '',
@@ -909,6 +1097,9 @@ export async function getDailyAttendance(
       startWork,
       endWork,
       status,
+      workedMinutes: attRecord?.worked_minutes ?? null,
+      breakMinutes: attRecord?.break_minutes ?? null,
+      activeHours,
       history,
     }
   })
@@ -949,6 +1140,9 @@ export interface LeaveSubmissionRecord {
   approvedBy?: string
   approvedAt?: string
   managerComment?: string
+  leaveDays?: number
+  paidLeaveDays?: number
+  lopDays?: number
 }
 
 function formatDayOfWeek(dateStr?: string | null): string {
@@ -1045,6 +1239,9 @@ export async function getLeaveSubmissions(
       approvedBy: lv.approved_by,
       approvedAt: lv.approved_at,
       managerComment: lv.manager_comment,
+      leaveDays: lv.leave_days || 0,
+      paidLeaveDays: lv.paid_leave_days || 0,
+      lopDays: lv.lop_days || 0,
     }
   })
 }
@@ -1263,3 +1460,136 @@ export async function updateEmployeeDetails(
 
 
 
+
+// --- LEAVE MANAGEMENT API INTEGRATION ---
+
+export interface SkyTrackLeave {
+  id: string
+  requestId: string
+  employeeId: string
+  fromDate: string
+  toDate: string
+  leaveType: 'casual' | 'sick' | string
+  reason?: string | null
+
+  leaveDays: number
+  paidLeaveDays: number
+  lopDays: number
+
+  status: string
+  approvedBy?: string | null
+  approvedAt?: string | null
+  managerComment?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SkyTrackLeaveBalance {
+  allocated: number
+  adjusted: number
+  used: number
+  balance: number
+}
+
+export interface SkyTrackEmployeeLeaveBalance {
+  casual: SkyTrackLeaveBalance
+  sick: SkyTrackLeaveBalance
+}
+
+async function fetchSkyTrackApi<T = any>(token: string, payload: any): Promise<T> {
+  const response = await fetch(SKYTRACK_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  })
+
+  let data: any
+  try {
+    data = await response.json()
+  } catch (err) {
+    throw new Error('Invalid JSON response from SkyTrack API.')
+  }
+
+  if (!response.ok || data.success === false) {
+    throw new Error(data?.error || data?.message || 'SkyTrack API request failed.')
+  }
+
+  return data as T
+}
+
+export async function submitLeave(
+  token: string,
+  fromDate: string,
+  toDate: string,
+  leaveType: 'casual' | 'sick' | string,
+  reason?: string
+): Promise<{ success: boolean; leave: SkyTrackLeave }> {
+  return fetchSkyTrackApi(token, {
+    action: 'leave_submit',
+    fromDate,
+    toDate,
+    leaveType,
+    reason,
+  })
+}
+
+export async function getLeaveHistory(
+  token: string
+): Promise<{ success: boolean; data: SkyTrackLeave[] }> {
+  return fetchSkyTrackApi(token, {
+    action: 'leave_history',
+  })
+}
+
+export async function getLeaveBalance(
+  token: string,
+  employeeId?: string
+): Promise<{ success: boolean; balance: SkyTrackEmployeeLeaveBalance }> {
+  return fetchSkyTrackApi(token, {
+    action: 'leave_balance',
+    employeeId,
+  })
+}
+
+export async function approveLeave(
+  token: string,
+  requestId: string,
+  managerComment?: string
+): Promise<{ success: boolean; leave?: SkyTrackLeave }> {
+  return fetchSkyTrackApi(token, {
+    action: 'approve_leave',
+    requestId,
+    managerComment,
+  })
+}
+
+export async function rejectLeave(
+  token: string,
+  requestId: string,
+  managerComment?: string
+): Promise<{ success: boolean; leave?: SkyTrackLeave }> {
+  return fetchSkyTrackApi(token, {
+    action: 'reject_leave',
+    requestId,
+    managerComment,
+  })
+}
+
+export async function adjustLeaveBalance(
+  token: string,
+  employeeId: string,
+  leaveType: 'casual' | 'sick' | string,
+  days: number,
+  reason: string
+): Promise<{ success: boolean }> {
+  return fetchSkyTrackApi(token, {
+    action: 'leave_balance_adjustment',
+    employeeId,
+    leaveType,
+    days,
+    reason,
+  })
+}

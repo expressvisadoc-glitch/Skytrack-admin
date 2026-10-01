@@ -1,5 +1,3 @@
-import React from 'react';
-
 export function NotificationPanel({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
   if (!isOpen) return null;
 

@@ -6,6 +6,12 @@ import {
   type EmployeeDirectoryItem,
   type AttendanceHistoryItem,
   type LeaveHistoryItem,
+  getLeaveBalance,
+  adjustLeaveBalance,
+  type SkyTrackEmployeeLeaveBalance,
+  getOrganizationData,
+  updateEmployeeOrganization,
+  type OrganizationData,
 } from '../lib/api'
 
 interface EmployeeDetailsProps {
@@ -19,6 +25,9 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
   const [currentEmp, setCurrentEmp] = useState<EmployeeDirectoryItem | null>(initialEmployee || null)
   const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryItem[]>([])
   const [leaveHistory, setLeaveHistory] = useState<LeaveHistoryItem[]>([])
+  const [leaveBalance, setLeaveBalance] = useState<SkyTrackEmployeeLeaveBalance | null>(null)
+  const [orgData, setOrgData] = useState<OrganizationData | null>(null)
+  const [isOrgLoading, setIsOrgLoading] = useState<boolean>(false)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -32,10 +41,23 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
     phone: initialEmployee?.phone || '',
     accountStatus: initialEmployee?.accountStatus || 'Active',
     avatar: initialEmployee?.avatar || '',
+    reportingManagerId: initialEmployee?.reportingManagerId || '',
+    departmentId: initialEmployee?.departmentId || '',
+    workShiftId: initialEmployee?.workShiftId || '',
   })
   const [isSaving, setIsSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
   const [editSuccessToast, setEditSuccessToast] = useState(false)
+
+  // Adjustment Modal State
+  const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false)
+  const [adjustFormData, setAdjustFormData] = useState({
+    leaveType: 'casual',
+    days: 0,
+    reason: '',
+  })
+  const [isAdjusting, setIsAdjusting] = useState(false)
+  const [adjustError, setAdjustError] = useState<string | null>(null)
 
   // Sync internal state if initial prop changes
   useEffect(() => {
@@ -49,6 +71,9 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
         phone: initialEmployee.phone || '',
         accountStatus: initialEmployee.accountStatus || 'Active',
         avatar: initialEmployee.avatar || '',
+        reportingManagerId: initialEmployee.reportingManagerId || '',
+        departmentId: initialEmployee.departmentId || '',
+        workShiftId: initialEmployee.workShiftId || '',
       })
     }
   }, [initialEmployee])
@@ -58,12 +83,24 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
     setIsLoading(true)
     setError(null)
     try {
-      const { attendanceHistory: att, leaveHistory: lv } = await getEmployeeHistory(
-        token,
-        currentEmp.id
-      )
-      setAttendanceHistory(att)
-      setLeaveHistory(lv)
+      setIsOrgLoading(true)
+      const [attData, balanceRes, orgRes] = await Promise.all([
+        getEmployeeHistory(token, currentEmp.id),
+        getLeaveBalance(token, currentEmp.id).catch(() => null),
+        getOrganizationData(token).catch((err: any) => {
+          console.error('Failed to load organization data', err)
+          return null
+        })
+      ])
+
+      setAttendanceHistory(attData.attendanceHistory)
+      setLeaveHistory(attData.leaveHistory)
+      if (balanceRes?.success && balanceRes.balance) {
+        setLeaveBalance(balanceRes.balance)
+      }
+      if (orgRes) {
+        setOrgData(orgRes)
+      }
     } catch (err: any) {
       console.error('Failed to load employee history:', err)
       if (err?.message === 'SESSION_EXPIRED') {
@@ -73,6 +110,7 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
       setError('Unable to load employee history records.')
     } finally {
       setIsLoading(false)
+      setIsOrgLoading(false)
     }
   }, [token, currentEmp?.id, logout])
 
@@ -98,6 +136,14 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
         profile_photo_url: editFormData.avatar.trim() || undefined,
       })
 
+      await updateEmployeeOrganization(
+        token,
+        currentEmp.id,
+        editFormData.reportingManagerId || null,
+        editFormData.departmentId || null,
+        editFormData.workShiftId || null
+      )
+
       const updatedEmp: EmployeeDirectoryItem = {
         ...currentEmp,
         name: editFormData.name.trim(),
@@ -107,6 +153,9 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
         phone: editFormData.phone.trim(),
         accountStatus: editFormData.accountStatus as 'Active' | 'Suspended' | 'Pending',
         avatar: editFormData.avatar.trim(),
+        reportingManagerId: editFormData.reportingManagerId || null,
+        departmentId: editFormData.departmentId || null,
+        workShiftId: editFormData.workShiftId || null,
       }
 
       setCurrentEmp(updatedEmp)
@@ -119,6 +168,31 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
       setEditError(err.message || 'Failed to update employee details.')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleAdjustSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!token || !currentEmp?.id) return
+
+    setIsAdjusting(true)
+    setAdjustError(null)
+    try {
+      await adjustLeaveBalance(
+        token,
+        currentEmp.id,
+        adjustFormData.leaveType,
+        Number(adjustFormData.days),
+        adjustFormData.reason
+      )
+      setIsAdjustModalOpen(false)
+      setAdjustFormData({ leaveType: 'casual', days: 0, reason: '' })
+      await loadHistory() // refresh balances
+    } catch (err: any) {
+      console.error('Failed to adjust leave balance:', err)
+      setAdjustError(err.message || 'Failed to adjust leave balance.')
+    } finally {
+      setIsAdjusting(false)
     }
   }
 
@@ -260,7 +334,7 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                 <span className="material-symbols-outlined text-[17px]">edit_square</span>
                 <span>Edit Employee</span>
               </button>
-              <div className="px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-right">
+              {/* <div className="px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-right">
                 <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                   Current Sync
                 </span>
@@ -268,7 +342,7 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                   <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
                   SkyTrack Live
                 </span>
-              </div>
+              </div> */}
             </div>
           </div>
 
@@ -285,6 +359,64 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
             <div className="flex items-center gap-2.5 text-xs text-slate-600">
               <span className="material-symbols-outlined text-slate-400 text-lg">calendar_today</span>
               <span>Joined: {empJoiningDate}</span>
+            </div>
+          </div>
+
+          {/* Organization Info Strip */}
+          <div className="mt-6 pt-5 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reporting Manager</span>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-slate-400 text-lg">badge</span>
+                <span className="text-sm font-semibold text-slate-800">
+                  {currentEmp?.reportingManagerId && orgData?.managers.find(m => m.id === currentEmp.reportingManagerId)
+                    ? orgData.managers.find(m => m.id === currentEmp.reportingManagerId)?.name
+                    : <span className="text-slate-400 italic font-normal">Not assigned</span>}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Department</span>
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-slate-400 text-lg">corporate_fare</span>
+                <span className="text-sm font-semibold text-slate-800">
+                  {currentEmp?.departmentId && orgData?.departments.find(d => d.id === currentEmp.departmentId)
+                    ? orgData.departments.find(d => d.id === currentEmp.departmentId)?.department_name
+                    : <span className="text-slate-400 italic font-normal">Not assigned</span>}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Work Shift</span>
+              <div className="flex items-start gap-2">
+                <span className="material-symbols-outlined text-slate-400 text-lg mt-0.5">schedule</span>
+                <div className="flex flex-col">
+                  {(() => {
+                    const shift = orgData?.work_shifts.find(s => s.id === currentEmp?.workShiftId)
+                    if (!shift) return <span className="text-sm text-slate-400 italic">Not assigned</span>
+
+                    const formatShiftTime = (timeStr: string) => {
+                      const [h, m] = timeStr.split(':')
+                      const hour = parseInt(h, 10)
+                      const ampm = hour >= 12 ? 'PM' : 'AM'
+                      const h12 = hour % 12 || 12
+                      return `${h12}:${m} ${ampm}`
+                    }
+
+                    const workHrs = Math.round(shift.working_minutes / 60)
+
+                    return (
+                      <>
+                        <span className="text-sm font-semibold text-slate-800">{shift.shift_name}</span>
+                        <span className="text-xs text-slate-500">{formatShiftTime(shift.start_time)} – {formatShiftTime(shift.end_time)}</span>
+                        <span className="text-xs text-emerald-600 font-medium">{workHrs} hrs working</span>
+                      </>
+                    )
+                  })()}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -451,6 +583,91 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                   </div>
                 </div>
 
+                {/* --- Organization Section --- */}
+                <div className="col-span-1 md:col-span-2 pt-4 mt-2 border-t border-slate-100 flex flex-col gap-4">
+                  <h4 className="text-sm font-bold text-slate-800">Organization</h4>
+
+                  {isOrgLoading ? (
+                    <div className="flex items-center gap-2 text-xs text-slate-500 py-2">
+                      <span className="material-symbols-outlined animate-spin text-sm">autorenew</span>
+                      <span>Loading organization structure...</span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Reporting Manager */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          Reporting Manager
+                        </label>
+                        <select
+                          value={editFormData.reportingManagerId}
+                          onChange={(e) => setEditFormData({ ...editFormData, reportingManagerId: e.target.value })}
+                          className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium"
+                        >
+                          <option value="">Select reporting manager</option>
+                          {orgData?.managers.map(m => (
+                            <option key={m.id} value={m.id} disabled={m.employee_id === currentEmp?.code}>
+                              {m.name} ({m.employee_id})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Department */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          Department
+                        </label>
+                        <select
+                          value={editFormData.departmentId}
+                          onChange={(e) => {
+                            const newDeptId = e.target.value;
+                            const newDeptName = orgData?.departments.find(d => d.id === newDeptId)?.department_name || editFormData.department;
+                            setEditFormData({ ...editFormData, departmentId: newDeptId, department: newDeptName })
+                          }}
+                          className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium"
+                        >
+                          <option value="">Select department</option>
+                          {orgData?.departments.map(d => (
+                            <option key={d.id} value={d.id}>
+                              {d.department_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Work Shift */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          Work Shift
+                        </label>
+                        <select
+                          value={editFormData.workShiftId}
+                          onChange={(e) => setEditFormData({ ...editFormData, workShiftId: e.target.value })}
+                          className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium"
+                        >
+                          <option value="">Select work shift</option>
+                          {orgData?.work_shifts.map(s => {
+                            const formatShiftTime = (timeStr: string) => {
+                              const [h, m] = timeStr.split(':')
+                              const hour = parseInt(h, 10)
+                              const ampm = hour >= 12 ? 'PM' : 'AM'
+                              const h12 = hour % 12 || 12
+                              return `${h12}:${m} ${ampm}`
+                            }
+                            const workHrs = Math.round(s.working_minutes / 60)
+                            return (
+                              <option key={s.id} value={s.id}>
+                                {s.shift_name} ({formatShiftTime(s.start_time)} – {formatShiftTime(s.end_time)}, {workHrs} hrs)
+                              </option>
+                            )
+                          })}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Modal Actions */}
                 <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100 mt-2">
                   <button
@@ -469,6 +686,101 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                       {isSaving ? 'refresh' : 'save'}
                     </span>
                     <span>{isSaving ? 'Saving Changes...' : 'Save Changes'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Adjust Leave Balance Modal */}
+        {isAdjustModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 md:p-8 max-w-lg w-full flex flex-col gap-6 animate-in fade-in zoom-in-95 my-8">
+              <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">tune</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <h3 className="text-lg font-bold text-slate-900">Manual Leave Adjustment</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Adjust {currentEmp?.name}'s leave balance
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsAdjustModalOpen(false)}
+                  className="w-8 h-8 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer"
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-[20px]">close</span>
+                </button>
+              </div>
+
+              <form onSubmit={handleAdjustSubmit} className="flex flex-col gap-5">
+                {adjustError && (
+                  <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]">error</span>
+                    <span>{adjustError}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Leave Type</label>
+                    <select
+                      value={adjustFormData.leaveType}
+                      onChange={(e) => setAdjustFormData({ ...adjustFormData, leaveType: e.target.value })}
+                      className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 transition-all font-semibold"
+                    >
+                      <option value="casual">Casual Leave</option>
+                      <option value="sick">Sick Leave</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Adjustment Days</label>
+                    <div className="text-xs text-slate-500 mb-1">Use positive numbers to add days, negative to subtract (e.g. 2, -1)</div>
+                    <input
+                      type="number"
+                      required
+                      value={adjustFormData.days}
+                      onChange={(e) => setAdjustFormData({ ...adjustFormData, days: Number(e.target.value) })}
+                      className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 transition-all font-medium"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Reason *</label>
+                    <textarea
+                      required
+                      value={adjustFormData.reason}
+                      onChange={(e) => setAdjustFormData({ ...adjustFormData, reason: e.target.value })}
+                      rows={3}
+                      placeholder="e.g. Compensatory off for weekend work"
+                      className="w-full p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 transition-all font-medium resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAdjustModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isAdjusting}
+                    className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-md shadow-red-600/20 hover:shadow-red-600/30 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-75"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">
+                      {isAdjusting ? 'refresh' : 'tune'}
+                    </span>
+                    <span>{isAdjusting ? 'Adjusting...' : 'Adjust Balance'}</span>
                   </button>
                 </div>
               </form>
@@ -517,22 +829,20 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
               </div>
             </div>
 
-            <div className={`p-4 rounded-xl border flex flex-col justify-between ${
-              todayAtt?.type === 'present'
-                ? 'bg-emerald-50/80 border-emerald-200/80 text-emerald-800'
-                : todayAtt?.type === 'late'
+            <div className={`p-4 rounded-xl border flex flex-col justify-between ${todayAtt?.type === 'present'
+              ? 'bg-emerald-50/80 border-emerald-200/80 text-emerald-800'
+              : todayAtt?.type === 'late'
                 ? 'bg-amber-50/80 border-amber-200/80 text-amber-800'
                 : todayAtt?.type === 'leave'
-                ? 'bg-purple-50/80 border-purple-200/80 text-purple-800'
-                : 'bg-rose-50/80 border-rose-200/80 text-rose-800'
-            }`}>
+                  ? 'bg-purple-50/80 border-purple-200/80 text-purple-800'
+                  : 'bg-rose-50/80 border-rose-200/80 text-rose-800'
+              }`}>
               <span className="text-xs font-semibold uppercase tracking-wider mb-2">
                 Status
               </span>
               <div className="flex items-center gap-2">
-                <span className={`w-2.5 h-2.5 rounded-full ${
-                  todayAtt?.type === 'present' ? 'bg-emerald-500' : todayAtt?.type === 'late' ? 'bg-amber-500' : todayAtt?.type === 'leave' ? 'bg-purple-500' : 'bg-rose-500'
-                }`}></span>
+                <span className={`w-2.5 h-2.5 rounded-full ${todayAtt?.type === 'present' ? 'bg-emerald-500' : todayAtt?.type === 'late' ? 'bg-amber-500' : todayAtt?.type === 'leave' ? 'bg-purple-500' : 'bg-rose-500'
+                  }`}></span>
                 <span className="text-2xl font-bold">
                   {todayAtt?.label || 'Absent'}
                 </span>
@@ -548,13 +858,85 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                   {currentEmp?.leaveStatus?.status === 'pending'
                     ? `Pending (${currentEmp.leaveStatus.type})`
                     : currentEmp?.leaveStatus?.status === 'approved'
-                    ? `Approved (${currentEmp.leaveStatus.type})`
-                    : 'None Active'}
+                      ? `Approved (${currentEmp.leaveStatus.type})`
+                      : 'None Active'}
                 </span>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Leave Balance Section */}
+        {leaveBalance && (
+          <div className="w-full rounded-2xl bg-white border border-slate-200/80 shadow-sm p-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 mb-5 border-b border-slate-100 gap-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-lg">account_balance_wallet</span>
+                </div>
+                <h2 className="text-lg font-bold text-slate-900">Leave Balance</h2>
+              </div>
+              <button
+                onClick={() => setIsAdjustModalOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-all cursor-pointer"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-[16px]">tune</span>
+                <span>Adjust Balance</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Casual Leave */}
+              <div className="p-5 rounded-xl border border-slate-200/80 bg-slate-50 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Casual Leave</h3>
+                  <span className="px-3 py-1 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700 shadow-sm">
+                    {leaveBalance.casual.balance} Days Left
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Allocated</span>
+                    <span className="text-lg font-extrabold text-slate-800">{leaveBalance.casual.allocated}</span>
+                  </div>
+                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Adjusted</span>
+                    <span className="text-lg font-extrabold text-slate-800">{leaveBalance.casual.adjusted}</span>
+                  </div>
+                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Used</span>
+                    <span className="text-lg font-extrabold text-slate-800">{leaveBalance.casual.used}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sick Leave */}
+              <div className="p-5 rounded-xl border border-slate-200/80 bg-slate-50 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Sick Leave</h3>
+                  <span className="px-3 py-1 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700 shadow-sm">
+                    {leaveBalance.sick.balance} Days Left
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Allocated</span>
+                    <span className="text-lg font-extrabold text-slate-800">{leaveBalance.sick.allocated}</span>
+                  </div>
+                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Adjusted</span>
+                    <span className="text-lg font-extrabold text-slate-800">{leaveBalance.sick.adjusted}</span>
+                  </div>
+                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Used</span>
+                    <span className="text-lg font-extrabold text-slate-800">{leaveBalance.sick.used}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Attendance History Section */}
         <div className="w-full rounded-2xl bg-white border border-slate-200/80 shadow-sm overflow-hidden">
@@ -640,9 +1022,8 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                       <tr key={row.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-3 px-6 text-xs font-semibold text-slate-900">{row.date}</td>
                         <td
-                          className={`py-3 px-4 text-xs font-semibold ${
-                            row.status === 'Late' ? 'text-amber-700' : 'text-slate-700'
-                          }`}
+                          className={`py-3 px-4 text-xs font-semibold ${row.status === 'Late' ? 'text-amber-700' : 'text-slate-700'
+                            }`}
                         >
                           {row.startTime}
                         </td>
