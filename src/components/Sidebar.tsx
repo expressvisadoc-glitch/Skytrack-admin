@@ -1,9 +1,14 @@
+import { useAuth } from '../contexts/AuthContext'
+
 interface SidebarProps {
   activeTab: string
   onSelectTab: (tab: string) => void
 }
 
 export function Sidebar({ activeTab, onSelectTab }: SidebarProps) {
+  const { employee } = useAuth()
+  const isSuperAdmin = employee?.role === 'super_admin'
+
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
     { id: 'employees', label: 'Employees', icon: 'badge' },
@@ -12,6 +17,7 @@ export function Sidebar({ activeTab, onSelectTab }: SidebarProps) {
     { id: 'public-holidays', label: 'Public Holidays', icon: 'event_available' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
     { id: 'organization', label: 'Organization', icon: 'corporate_fare' },
+    ...(isSuperAdmin ? [{ id: 'admin-management', label: 'Admin Management', icon: 'admin_panel_settings' }] : []),
   ]
 
   return (

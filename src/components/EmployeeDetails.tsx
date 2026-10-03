@@ -199,7 +199,7 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
   const empName = currentEmp?.name || 'Employee'
   const empCode = currentEmp?.code || '—'
   const empRole = currentEmp?.role || 'Field Personnel'
-  const empDepartment = currentEmp?.department || 'Operations'
+  const empDepartment = currentEmp?.department || 'Department Not Set'
   const empEmail = currentEmp?.email || '—'
   const empPhone = currentEmp?.phone || '—'
   const empJoiningDate = currentEmp?.joiningDate || '—'

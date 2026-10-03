@@ -37,7 +37,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // Load session from storage on initial application mount
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY)
+      const stored = sessionStorage.getItem(STORAGE_KEY)
       if (stored) {
         const parsed: AdminSession = JSON.parse(stored)
         // Check if token has expired
@@ -49,19 +49,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setSession(parsed)
           } else {
             // Non-admin session found in storage, discard
-            localStorage.removeItem(STORAGE_KEY)
             sessionStorage.removeItem(STORAGE_KEY)
             setSession(null)
           }
         } else if (isExpired) {
-          localStorage.removeItem(STORAGE_KEY)
           sessionStorage.removeItem(STORAGE_KEY)
           setSession(null)
         }
       }
     } catch (err) {
       console.error('Failed to parse stored session:', err)
-      localStorage.removeItem(STORAGE_KEY)
       sessionStorage.removeItem(STORAGE_KEY)
       setSession(null)
     } finally {
@@ -95,7 +92,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const login = async (
     employeeId: string,
     password: string,
-    remember: boolean = true
+    _remember: boolean = true
   ): Promise<{ success: boolean; error?: string; code?: string }> => {
     try {
       const response: SkyTrackLoginResponse = await loginWithSkyTrack(employeeId, password)
@@ -157,14 +154,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         expiresAt,
       }
 
-      // Persist Session
-      const storage = remember ? localStorage : sessionStorage
-      storage.setItem(STORAGE_KEY, JSON.stringify(newSession))
-      if (remember) {
-        sessionStorage.removeItem(STORAGE_KEY)
-      } else {
-        localStorage.removeItem(STORAGE_KEY)
-      }
+      // Persist Session (in sessionStorage only, so it survives refresh but requires login on new tab/launch)
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(newSession))
 
       setSession(newSession)
       return { success: true }
@@ -187,7 +178,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
    * Log out the current administrator session
    */
   const logout = () => {
-    localStorage.removeItem(STORAGE_KEY)
     sessionStorage.removeItem(STORAGE_KEY)
     setSession(null)
   }

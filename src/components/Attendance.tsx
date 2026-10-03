@@ -4,6 +4,7 @@ import {
   getDailyAttendance,
   type FullAttendanceRecord,
 } from '../lib/api'
+import { generateAttendancePdf } from '../lib/attendancePdf'
 
 export function Attendance() {
   const { token, logout } = useAuth()
@@ -91,32 +92,23 @@ export function Attendance() {
     return records.find((r) => r.id === selectedId) || records[0] || null
   }, [records, selectedId])
 
-  const handleDownloadSheet = () => {
+  const handleDownloadSheet = async () => {
     if (!selectedRecord) return
     setDownloadToast(true)
 
-    // Build actual CSV file contents
-    const headers = ['Employee ID', 'Employee Name', 'Date', 'Time/Duration', 'Status']
-    const rows = (selectedRecord.history || []).map((h) => [
-      `"${selectedRecord.employeeId}"`,
-      `"${selectedRecord.employeeName}"`,
-      `"${h.date}"`,
-      `"${h.time}"`,
-      `"${h.status}"`,
-    ])
-
-    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    // Build and download PDF attendance sheet
+    const blob = await generateAttendancePdf(selectedRecord, formattedToday)
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.setAttribute('href', url)
     link.setAttribute(
       'download',
-      `SkyTrack_Attendance_${selectedRecord.employeeId}_${todayIsoDate}.csv`
+      `SkyTrack_Attendance_${selectedRecord.employeeId}_${todayIsoDate}.pdf`
     )
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+    URL.revokeObjectURL(url)
 
     setTimeout(() => setDownloadToast(false), 3000)
   }
@@ -131,7 +123,7 @@ export function Attendance() {
           <div className="flex flex-col text-xs">
             <span className="font-bold">Attendance Sheet Generated</span>
             <span className="text-slate-400">
-              Downloaded CSV for {selectedRecord.employeeName}...
+              Downloaded PDF for {selectedRecord.employeeName}...
             </span>
           </div>
         </div>
@@ -636,9 +628,9 @@ export function Attendance() {
                   type="button"
                 >
                   <span className="material-symbols-outlined text-[17px]">
-                    download
+                    picture_as_pdf
                   </span>
-                  <span>Download Attendance Sheet</span>
+                  <span>Download Attendance Sheet (PDF)</span>
                 </button>
               </div>
             ) : (

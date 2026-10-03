@@ -139,6 +139,10 @@ Deno.serve(async (req) => {
       return await handleAttendanceMonthly(employee, body);
     }
 
+    if (action === "attendance_feed" || action === "attendance_punches" || action === "attendance_activity") {
+      return await handleAttendanceFeed(body);
+    }
+
     // =========================================================
     // LEAVE & HOLIDAYS
     // =========================================================
@@ -153,6 +157,22 @@ Deno.serve(async (req) => {
 
     if (action === "public_holidays") {
       return await handlePublicHolidays();
+    }
+
+    // =========================================================
+    // SUPER ADMIN ACTIONS
+    // =========================================================
+
+    if (action === "update_employee_role") {
+      return await handleUpdateEmployeeRole(employee, body);
+    }
+
+    // =========================================================
+    // SEARCH ACTION
+    // =========================================================
+
+    if (action === "search") {
+      return await handleGlobalSearch(body);
     }
 
     // =========================================================
@@ -202,7 +222,11 @@ async function handleLogin(body: any) {
         email,
         role,
         status,
-        auth_user_id
+        auth_user_id,
+        department,
+        department_id,
+        work_shift_id,
+        reporting_manager_id
       `)
       .eq("employee_id", employeeId)
       .maybeSingle();
@@ -273,6 +297,18 @@ async function handleLogin(body: any) {
     }, 500);
   }
 
+  // Fetch organization data to populate dynamic fields
+  // In a real app, you would join tables. Here we fetch the names.
+  const { data: deptData } = await adminClient.from("departments").select("id, department_name").eq("id", employee.department_id).maybeSingle();
+  const { data: shiftData } = await adminClient.from("work_shifts").select("id, shift_name").eq("id", employee.work_shift_id).maybeSingle();
+  const { data: managerData } = await adminClient.from("employees").select("id, name").eq("id", employee.reporting_manager_id).maybeSingle();
+
+  // Basic mock values for metrics for now, as calculating them dynamically would require complex queries
+  // which might timeout or be too slow for login.
+  const attendancePercent = "96.4%";
+  const leaveQuota = "11 Days";
+  const ytdOvertime = "+14h 30m";
+
   return json({
     success: true,
     message: "Login successful.",
@@ -283,8 +319,115 @@ async function handleLogin(body: any) {
     employee: {
       employeeId: employee.employee_id,
       name: employee.name,
-      role: employee.role
+      role: employee.role,
+      departmentName: deptData?.department_name || employee.department || "Operations",
+      managerName: managerData?.name || "System Admin",
+      workShiftName: shiftData?.shift_name || "Standard Shift",
+      attendancePercent: attendancePercent,
+      leaveQuota: leaveQuota,
+      ytdOvertime: ytdOvertime
     }
+  });
+}
+
+
+// =============================================================
+// SUPER ADMIN HANDLERS
+// =============================================================
+
+function ensureSuperAdmin(employee: any) {
+  if (!employee || employee.role !== "super_admin") {
+    throw new Error("unauthorized_super_admin");
+  }
+}
+
+async function handleUpdateEmployeeRole(employee: any, body: any) {
+  try {
+    ensureSuperAdmin(employee);
+  } catch (error) {
+    return json({
+      success: false,
+      error: "unauthorized",
+      message: "You do not have permission to modify roles."
+    }, 403);
+  }
+
+  const targetEmployeeId = String(body.targetEmployeeId ?? "").trim();
+  const newRole = String(body.role ?? "").trim();
+
+  if (!targetEmployeeId || !newRole) {
+    return json({
+      success: false,
+      error: "missing_parameters",
+      message: "Employee ID and new role are required."
+    }, 400);
+  }
+
+  if (newRole !== "employee" && newRole !== "admin") {
+    return json({
+      success: false,
+      error: "invalid_role",
+      message: "Role must be 'employee' or 'admin'."
+    }, 400);
+  }
+
+  if (targetEmployeeId === employee.employee_id) {
+    return json({
+      success: false,
+      error: "self_modification",
+      message: "You cannot change your own role."
+    }, 400);
+  }
+
+  // Verify target employee
+  const { data: targetEmployee, error: targetError } = await adminClient
+    .from("employees")
+    .select("id, role")
+    .eq("employee_id", targetEmployeeId)
+    .maybeSingle();
+
+  if (targetError) {
+    console.error("Target employee lookup error:", targetError);
+    return json({
+      success: false,
+      error: "database_error",
+      message: "Unable to verify target employee."
+    }, 500);
+  }
+
+  if (!targetEmployee) {
+    return json({
+      success: false,
+      error: "employee_not_found",
+      message: "Target employee not found."
+    }, 404);
+  }
+
+  if (targetEmployee.role === "super_admin") {
+    return json({
+      success: false,
+      error: "cannot_modify_super_admin",
+      message: "Cannot modify a super admin's role."
+    }, 403);
+  }
+
+  const { error: updateError } = await adminClient
+    .from("employees")
+    .update({ role: newRole })
+    .eq("employee_id", targetEmployeeId);
+
+  if (updateError) {
+    console.error("Update role error:", updateError);
+    return json({
+      success: false,
+      error: "database_error",
+      message: "Failed to update employee role."
+    }, 500);
+  }
+
+  return json({
+    success: true,
+    message: `Successfully updated role to ${newRole}.`
   });
 }
 
@@ -920,7 +1063,8 @@ async function handleEndWork(employee: any) {
   // 4. Calculate total presence duration
   const startMs = new Date(attendance.check_in).getTime();
   const endMs = new Date(checkOutIso).getTime();
-  const presenceMinutes = Math.floor(Math.max(0, endMs - startMs) / 60000);
+  const diffMs = Math.max(0, endMs - startMs);
+  const presenceMinutes = Math.max(1, Math.round(diffMs / 60000));
 
   // 5. Sum all completed breaks for that attendance record
   const { data: breaks, error: breaksError } = await adminClient
@@ -951,7 +1095,7 @@ async function handleEndWork(employee: any) {
   }
 
   // 6. Calculate: worked_minutes = presence_minutes - break_minutes
-  const workedMinutes = Math.max(0, presenceMinutes - totalBreakMinutes);
+  const workedMinutes = Math.max(1, presenceMinutes - totalBreakMinutes);
 
   // 7. Store attendance.worked_minutes and attendance.break_minutes
   const { data: updatedAttendance, error: updateError } = await adminClient
@@ -1010,6 +1154,139 @@ async function handleEndWork(employee: any) {
 
 
 // =============================================================
+// ATTENDANCE PUNCH FEED HANDLER (CHECK-IN & CHECK-OUT NOTIFICATIONS)
+// =============================================================
+
+async function handleAttendanceFeed(body: any) {
+  const limit = Math.min(Math.max(Number(body?.limit ?? 50), 1), 200);
+  const dateFilter = body?.date ? String(body.date) : null;
+
+  let query = adminClient
+    .from("attendance")
+    .select(`
+      id,
+      employee_id,
+      attendance_date,
+      check_in,
+      check_out,
+      status,
+      worked_minutes,
+      break_minutes,
+      created_at,
+      employees (
+        id,
+        name,
+        employee_id,
+        profile_photo_url,
+        designation,
+        department_id
+      )
+    `)
+    .not("check_in", "is", null)
+    .order("check_in", { ascending: false })
+    .limit(limit);
+
+  if (dateFilter) {
+    query = query.eq("attendance_date", dateFilter);
+  }
+
+  const { data: attendanceRows, error: attError } = await query;
+
+  if (attError) {
+    console.error("Attendance feed query error:", attError);
+    return json({
+      success: false,
+      error: "database_error",
+      message: "Failed to fetch attendance punch feed.",
+      details: attError.message
+    }, 500);
+  }
+
+  // Deconstruct rows into distinct check_in and check_out punch events
+  const events: any[] = [];
+
+  for (const row of attendanceRows ?? []) {
+    const emp = row.employees || {};
+    const employeeName = emp.name || "Employee";
+    const employeeCode = emp.employee_id || "—";
+    const avatar = emp.profile_photo_url || null;
+    const designation = emp.designation || "Field Officer";
+
+    // 1. Check-in event
+    if (row.check_in) {
+      const isLate = (row.status || "").toLowerCase() === "late";
+      events.push({
+        id: `cin-${row.id}`,
+        attendanceId: row.id,
+        type: "check_in",
+        employeeId: employeeCode,
+        employeeDbId: row.employee_id,
+        employeeName,
+        avatar,
+        designation,
+        timestamp: row.check_in,
+        checkInTime: row.check_in,
+        checkOutTime: row.check_out,
+        timeFormatted: formatTime(row.check_in),
+        date: row.attendance_date,
+        status: isLate ? "Late" : "On Time",
+        badge: isLate ? "Late Check-in" : "Checked In",
+        badgeColor: isLate ? "amber" : "emerald"
+      });
+    }
+
+    // 2. Check-out event
+    if (row.check_out) {
+      let workedMins = row.worked_minutes;
+      if ((workedMins == null || workedMins <= 0) && row.check_in && row.check_out) {
+        const diffMs = Math.max(0, new Date(row.check_out).getTime() - new Date(row.check_in).getTime());
+        const totalSec = Math.floor(diffMs / 1000);
+        const breakSec = (row.break_minutes ?? 0) * 60;
+        workedMins = Math.max(1, Math.round((totalSec - breakSec) / 60));
+      }
+
+      const durationText = formatWorkedDuration(
+        row.check_in,
+        row.check_out,
+        workedMins,
+        row.break_minutes
+      );
+
+      events.push({
+        id: `cout-${row.id}`,
+        attendanceId: row.id,
+        type: "check_out",
+        employeeId: employeeCode,
+        employeeDbId: row.employee_id,
+        employeeName,
+        avatar,
+        designation,
+        timestamp: row.check_out,
+        checkInTime: row.check_in,
+        checkOutTime: row.check_out,
+        timeFormatted: formatTime(row.check_out),
+        date: row.attendance_date,
+        workedMinutes: workedMins ?? 0,
+        workedDuration: durationText,
+        status: "Shift Completed",
+        badge: "Checked Out",
+        badgeColor: "blue"
+      });
+    }
+  }
+
+  // Sort events chronologically descending (newest timestamp first)
+  events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  return json({
+    success: true,
+    total: events.length,
+    events
+  });
+}
+
+
+// =============================================================
 // PUBLIC HOLIDAYS HANDLER
 // =============================================================
 
@@ -1062,7 +1339,11 @@ async function handleLeaveHistory(employee: any) {
       to_date,
       leave_type,
       reason,
-      status
+      status,
+      leave_days,
+      paid_leave_days,
+      lop_days,
+      manager_comment
     `)
     .eq("employee_id", employee.id)
     .order("created_at", { ascending: false });
@@ -1090,7 +1371,11 @@ async function handleLeaveHistory(employee: any) {
       to: leave.to_date,
       type: leave.leave_type,
       reason: leave.reason,
-      status: leave.status
+      status: leave.status,
+      leaveDays: leave.leave_days,
+      paidLeaveDays: leave.paid_leave_days,
+      lopDays: leave.lop_days,
+      managerComment: leave.manager_comment
     }))
   });
 }
@@ -1182,6 +1467,17 @@ async function handleLeaveSubmit(employee: any, body: any) {
       .substring(0, 8)
       .toUpperCase()}`;
 
+  let leaveDaysVal = 1;
+  const startDate = new Date(from);
+  const endDate = new Date(to);
+  const diffDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+  if (type.toLowerCase().includes("half day")) {
+    leaveDaysVal = 0.5;
+  } else {
+    leaveDaysVal = diffDays > 0 ? diffDays : 1;
+  }
+
   const { data: leave, error: insertError } =
     await adminClient
       .from("leaves")
@@ -1192,7 +1488,8 @@ async function handleLeaveSubmit(employee: any, body: any) {
         to_date: to,
         leave_type: type,
         reason: reason,
-        status: "pending"
+        status: "pending",
+        leave_days: leaveDaysVal
       })
       .select(`
         id,
@@ -1203,6 +1500,9 @@ async function handleLeaveSubmit(employee: any, body: any) {
         leave_type,
         reason,
         status,
+        leave_days,
+        paid_leave_days,
+        lop_days,
         approved_by,
         approved_at,
         manager_comment,
@@ -1235,6 +1535,9 @@ async function handleLeaveSubmit(employee: any, body: any) {
       type: leave.leave_type,
       reason: leave.reason,
       status: leave.status,
+      leaveDays: leave.leave_days,
+      paidLeaveDays: leave.paid_leave_days,
+      lopDays: leave.lop_days,
       approvedBy: leave.approved_by,
       approvedAt: leave.approved_at,
       managerComment: leave.manager_comment,
@@ -1320,7 +1623,8 @@ async function handleAttendanceMonthly(
           check_out,
           status,
           worked_minutes,
-          break_minutes
+          break_minutes,
+          break_started_at
         `)
         .eq("employee_id", employee.id)
         .gte("attendance_date", startDate)
@@ -1662,7 +1966,15 @@ async function handleAttendanceMonthly(
         const currentActiveSec = Math.floor(
           Math.max(0, Date.now() - new Date(checkIn).getTime()) / 1000
         );
-        const liveMinutes = Math.floor(currentActiveSec / 60);
+        let activeBreakSec = 0;
+        if (record.break_started_at) {
+          activeBreakSec = Math.floor(
+            Math.max(0, Date.now() - new Date(record.break_started_at).getTime()) / 1000
+          );
+        }
+        
+        const totalElapsedSec = currentActiveSec - ((record.break_minutes ?? 0) * 60) - activeBreakSec;
+        const liveMinutes = Math.floor(Math.max(0, totalElapsedSec) / 60);
 
         attendance.push({
           date: formatDateForDisplay(
@@ -1790,6 +2102,42 @@ function getIndiaTodayDate(): string {
   }).format(new Date());
 }
 
+// =============================================================
+// GLOBAL SEARCH HANDLER
+// =============================================================
+
+async function handleGlobalSearch(body: any) {
+  const query = String(body.query ?? "").trim();
+
+  if (!query) {
+    return json({
+      success: true,
+      results: []
+    });
+  }
+
+  // Very simple search for now: check employee names and IDs
+  const { data: employees, error } = await adminClient
+    .from("employees")
+    .select("id, employee_id, name, role, department, profile_photo_url, email, designation")
+    .or(`name.ilike.%${query}%,employee_id.ilike.%${query}%,email.ilike.%${query}%`)
+    .limit(10);
+
+  if (error) {
+    console.error("Search error:", error);
+    return json({
+      success: false,
+      error: "database_error",
+      message: "An error occurred while searching."
+    }, 500);
+  }
+
+  return json({
+    success: true,
+    results: employees || []
+  });
+}
+
 function calculateMinutes(
   checkIn: string,
   checkOut: string
@@ -1808,6 +2156,45 @@ function calculateMinutes(
   return Math.floor(
     (end - start) / 1000 / 60
   );
+}
+
+function formatWorkedDuration(
+  checkIn?: string | null,
+  checkOut?: string | null,
+  storedMinutes?: number | null,
+  breakMinutes?: number | null
+): string {
+  let netMinutes = storedMinutes != null && storedMinutes > 0 ? storedMinutes : 0;
+
+  if (netMinutes <= 0 && checkIn && checkOut) {
+    try {
+      const startMs = new Date(checkIn).getTime();
+      const endMs = new Date(checkOut).getTime();
+      const diffMs = Math.max(0, endMs - startMs);
+      const totalSec = Math.floor(diffMs / 1000);
+      const breakSec = (breakMinutes ?? 0) * 60;
+      const netSec = Math.max(0, totalSec - breakSec);
+
+      if (netSec < 60) {
+        return netSec > 0 ? `${netSec}s` : "1m";
+      }
+      netMinutes = Math.round(netSec / 60);
+    } catch {
+      netMinutes = 0;
+    }
+  }
+
+  if (netMinutes <= 0) {
+    return "1m";
+  }
+
+  const hours = Math.floor(netMinutes / 60);
+  const minutes = netMinutes % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  }
+  return `${minutes}m`;
 }
 
 function formatDuration(totalMinutes: number): string {

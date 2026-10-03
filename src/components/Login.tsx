@@ -7,10 +7,10 @@ interface LoginProps {
 
 export function Login({ onLoginSuccess }: LoginProps) {
   const { login } = useAuth()
-  const [credential, setCredential] = useState('')
-  const [password, setPassword] = useState('')
+  const [credential, setCredential] = useState(() => localStorage.getItem('skytrack_admin_credential') || '')
+  const [password, setPassword] = useState(() => localStorage.getItem('skytrack_admin_password') || '')
   const [showPassword, setShowPassword] = useState(false)
-  const [rememberDevice, setRememberDevice] = useState(true)
+  const [rememberDevice, setRememberDevice] = useState(() => localStorage.getItem('skytrack_admin_remember') === 'true' || localStorage.getItem('skytrack_admin_remember') === null)
   const [statusState, setStatusState] = useState<'idle' | 'verifying' | 'approved'>('idle')
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -23,6 +23,16 @@ export function Login({ onLoginSuccess }: LoginProps) {
 
     setErrorMessage('')
     setStatusState('verifying')
+
+    if (rememberDevice) {
+      localStorage.setItem('skytrack_admin_credential', credential.trim())
+      localStorage.setItem('skytrack_admin_password', password)
+      localStorage.setItem('skytrack_admin_remember', 'true')
+    } else {
+      localStorage.removeItem('skytrack_admin_credential')
+      localStorage.removeItem('skytrack_admin_password')
+      localStorage.setItem('skytrack_admin_remember', 'false')
+    }
 
     const result = await login(credential.trim(), password, rememberDevice)
 

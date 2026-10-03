@@ -10,6 +10,7 @@ import { Settings } from './components/Settings'
 import { Organization } from './components/Organization'
 import { Login } from './components/Login'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { AdminManagement } from './components/AdminManagement'
 import { useAuth } from './contexts/AuthContext'
 import './index.css'
 
@@ -39,7 +40,7 @@ function App() {
 
         {/* Main Body Content Frame */}
         <div className="pl-72">
-          <Header />
+          <Header onSelectTab={setActiveTab} />
           {activeTab === 'dashboard' ? (
             <Dashboard />
           ) : activeTab === 'employees' ? (
@@ -54,6 +55,8 @@ function App() {
             <Settings />
           ) : activeTab === 'organization' ? (
             <Organization />
+          ) : activeTab === 'admin-management' ? (
+            <AdminManagement />
           ) : (
             <div className="pt-28 px-8 flex flex-col items-center justify-center min-h-[60vh] text-center">
               <div className="w-16 h-16 rounded-3xl bg-red-50 text-red-500 flex items-center justify-center mb-4">

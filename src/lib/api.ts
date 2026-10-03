@@ -665,8 +665,10 @@ export async function getAdminDashboardData(
 export interface EmployeeDirectoryItem {
   id: string
   code: string
+  employee_id: string
   name: string
   role: string
+  designation?: string
   department: string
   email: string
   phone?: string
@@ -720,13 +722,15 @@ export async function getEmployeesDirectory(
   const now = new Date()
   const todayIsoDate = now.toISOString().slice(0, 10)
 
-  const [employeesData, attendanceData, leavesData] = await Promise.all([
+  const [employeesData, attendanceData, leavesData, deptsData] = await Promise.all([
     fetchSupabaseRest<SkyTrackEmployee[]>('employees?select=*&order=name.asc', token),
     fetchSupabaseRest<any[]>(
       `attendance?attendance_date=eq.${todayIsoDate}&select=*`,
       token
     ),
     fetchSupabaseRest<any[]>('leaves?select=*&order=created_at.desc', token),
+    fetchSupabaseRest<any[]>('departments?select=*', token),
+    fetchSupabaseRest<any[]>('work_shifts?select=*', token)
   ])
 
   const employees = employeesData || []
@@ -821,12 +825,15 @@ export async function getEmployeesDirectory(
           .toUpperCase()
       : 'SK'
 
+    const employee_id = emp.employee_id || emp.employeeId || emp.code || ''
     return {
       id: emp.id || String(Math.random()),
-      code: emp.employee_id || emp.employeeId || '—',
+      code: employee_id || '—',
+      employee_id,
       name: emp.name || 'Unnamed Employee',
-      role: emp.designation || emp.role || 'Field Personnel',
-      department: emp.department || 'Operations',
+      role: emp.role || 'employee',
+      designation: emp.designation || 'Field Personnel',
+      department: emp.department_id ? (deptsData?.find(d => d.id === emp.department_id)?.department_name || emp.department) : (emp.department || 'Department Not Set'),
       email: emp.email || '—',
       phone: emp.phone || '—',
       joiningDate: emp.joining_date ? formatDate(emp.joining_date) : '—',
@@ -929,6 +936,8 @@ export interface FullAttendanceRecord {
   employeeName: string
   role: string
   department: string
+  shiftStart?: string
+  shiftEnd?: string
   avatar?: string
   initials?: string
   initialsBg?: string
@@ -966,7 +975,7 @@ export async function getDailyAttendance(
 }> {
   const targetDate = targetDateStr || new Date().toISOString().slice(0, 10)
 
-  const [employeesData, attendanceData, leavesData, allRecentAttendance] =
+  const [employeesData, attendanceData, leavesData, allRecentAttendance, deptsData, shiftsData] =
     await Promise.all([
       fetchSupabaseRest<SkyTrackEmployee[]>('employees?select=*&order=name.asc', token),
       fetchSupabaseRest<any[]>(
@@ -978,6 +987,8 @@ export async function getDailyAttendance(
         'attendance?select=*&order=attendance_date.desc&limit=150',
         token
       ),
+      fetchSupabaseRest<any[]>('departments?select=*', token),
+      fetchSupabaseRest<any[]>('work_shifts?select=*', token)
     ])
 
   const employees = employeesData || []
@@ -1079,9 +1090,19 @@ export async function getDailyAttendance(
 
     let activeHours: string | undefined
     if (attRecord?.worked_minutes != null) {
-      const h = Math.floor(attRecord.worked_minutes / 60)
+      const h = Math.floor(attRecord?.worked_minutes / 60)
       const m = attRecord.worked_minutes % 60
       activeHours = `${h}h ${String(m).padStart(2, '0')}m`
+    }
+
+    let shiftStart = '09:00 AM'
+    let shiftEnd = '06:00 PM'
+    if (emp.shift_id && shiftsData) {
+      const shift = shiftsData.find(s => s.id === emp.shift_id)
+      if (shift) {
+        if (shift.start_time) shiftStart = shift.start_time.substring(0, 5) // HH:MM
+        if (shift.end_time) shiftEnd = shift.end_time.substring(0, 5)
+      }
     }
 
     return {
@@ -1090,7 +1111,9 @@ export async function getDailyAttendance(
       employeeId: emp.employee_id || emp.employeeId || '—',
       employeeName: emp.name || 'Unnamed Employee',
       role: emp.designation || emp.role || 'Field Personnel',
-      department: emp.department || 'Operations',
+      department: emp.department_id ? (deptsData?.find(d => d.id === emp.department_id)?.department_name || emp.department) : (emp.department || 'Department Not Set'),
+      shiftStart,
+      shiftEnd,
       avatar: emp.profile_photo_url || emp.avatar_url || undefined,
       initials,
       date: formatDate(targetDate),
@@ -1121,6 +1144,7 @@ export interface LeaveSubmissionRecord {
   id: string
   leaveDbId: string
   requestId?: string
+  request_id?: string
   employeeId: string
   employeeName: string
   role: string
@@ -1220,6 +1244,7 @@ export async function getLeaveSubmissions(
       id: lv.id,
       leaveDbId: lv.id,
       requestId: lv.request_id || undefined,
+      request_id: lv.request_id || undefined,
       employeeId: emp.employee_id || '—',
       employeeName: emp.name || 'Unnamed Employee',
       role: emp.designation || 'Field Officer',
@@ -1360,6 +1385,18 @@ export async function getAdminProfile(
       console.warn('Could not fetch employee record:', err)
     }
   }
+  
+  let deptName = empRecord?.department || 'Department Not Set'
+  if (empRecord?.department_id) {
+    try {
+      const depts = await fetchSupabaseRest<any[]>(`departments?id=eq.${empRecord.department_id}&select=department_name`, token)
+      if (depts && depts.length > 0) {
+        deptName = depts[0].department_name
+      }
+    } catch (err) {
+      console.warn('Could not fetch department name:', err)
+    }
+  }
 
   return {
     ...(empRecord || {}),
@@ -1369,7 +1406,7 @@ export async function getAdminProfile(
     email: empRecord?.email || effectiveEmail || '',
     role: empRecord?.designation || empRecord?.role || 'System Administrator',
     designation: empRecord?.designation || empRecord?.role || 'System Administrator',
-    department: empRecord?.department || 'Operations',
+    department: deptName,
     profile_photo_url: empRecord?.profile_photo_url || undefined,
   }
 }
@@ -1460,6 +1497,47 @@ export async function updateEmployeeDetails(
 
 
 
+
+export interface CreateEmployeeResponse {
+  success: boolean
+  message?: string
+  employee?: {
+    id: string
+    employee_id: string
+    name: string
+    email: string
+    role?: string
+    status?: string
+    [key: string]: any
+  }
+  [key: string]: any
+}
+
+export async function createEmployee(
+  token: string,
+  payload: {
+    name: string
+    email: string
+    password?: string
+  }
+): Promise<CreateEmployeeResponse> {
+  return fetchSkyTrackApi(token, {
+    action: 'create_employee',
+    ...payload,
+  })
+}
+
+export async function updateEmployeeRole(
+  token: string,
+  employeeId: string,
+  role: 'employee' | 'admin'
+): Promise<{ success: boolean; message: string }> {
+  return fetchSkyTrackApi(token, {
+    action: 'update_employee_role',
+    employeeId,
+    role,
+  })
+}
 
 // --- LEAVE MANAGEMENT API INTEGRATION ---
 
@@ -1593,3 +1671,168 @@ export async function adjustLeaveBalance(
     reason,
   })
 }
+
+export async function searchGlobal(
+  token: string,
+  query: string
+): Promise<{ success: boolean; results: any[] }> {
+  return fetchSkyTrackApi(token, {
+    action: 'search',
+    query,
+  })
+}
+
+export interface AttendancePunchEvent {
+  id: string
+  attendanceId: string
+  type: 'check_in' | 'check_out'
+  employeeId: string
+  employeeDbId?: string
+  employeeName: string
+  avatar: string | null
+  designation: string
+  department?: string
+  timestamp: string
+  checkInTime?: string | null
+  checkOutTime?: string | null
+  timeFormatted: string | null
+  date: string
+  status: string
+  badge: string
+  badgeColor?: string
+  workedMinutes?: number
+  workedDuration?: string
+}
+
+export function formatWorkedDuration(
+  checkIn?: string | null,
+  checkOut?: string | null,
+  storedMinutes?: number | null,
+  breakMinutes?: number | null
+): string {
+  let netMinutes = storedMinutes != null && storedMinutes > 0 ? storedMinutes : 0
+
+  if (netMinutes <= 0 && checkIn && checkOut) {
+    try {
+      const start = new Date(checkIn).getTime()
+      const end = new Date(checkOut).getTime()
+      const diffMs = Math.max(0, end - start)
+      const totalSec = Math.floor(diffMs / 1000)
+      const breakSec = (breakMinutes ?? 0) * 60
+      const netSec = Math.max(0, totalSec - breakSec)
+
+      if (netSec < 60) {
+        return netSec > 0 ? `${netSec}s` : '1m'
+      }
+      netMinutes = Math.round(netSec / 60)
+    } catch {
+      netMinutes = 0
+    }
+  }
+
+  if (netMinutes <= 0) {
+    return '1m'
+  }
+
+  const hours = Math.floor(netMinutes / 60)
+  const mins = netMinutes % 60
+
+  if (hours > 0) {
+    return `${hours}h ${String(mins).padStart(2, '0')}m`
+  }
+  return `${mins}m`
+}
+
+export async function getAttendancePunchFeed(
+  token: string,
+  limit: number = 50
+): Promise<AttendancePunchEvent[]> {
+  // 1. Try backend Edge Function
+  try {
+    const res = await fetchSkyTrackApi<{ success: boolean; events: AttendancePunchEvent[] }>(token, {
+      action: 'attendance_feed',
+      limit,
+    })
+    if (res && res.success && Array.isArray(res.events)) {
+      return res.events
+    }
+  } catch (err) {
+    console.warn('Backend attendance_feed fallback to Supabase REST:', err)
+  }
+
+  // 2. Direct Supabase REST fallback
+  try {
+    const rawData = await fetchSupabaseRest<any[]>(
+      `attendance?select=id,employee_id,attendance_date,check_in,check_out,status,worked_minutes,employees:employees(id,name,employee_id,profile_photo_url,designation)&not.check_in.is.null&order=check_in.desc&limit=${limit}`,
+      token
+    )
+
+    const events: AttendancePunchEvent[] = []
+    for (const row of rawData || []) {
+      const emp = row.employees || {}
+      const employeeName = emp.name || 'Employee'
+      const employeeCode = emp.employee_id || '—'
+      const avatar = emp.profile_photo_url || null
+      const designation = emp.designation || 'Field Staff'
+
+      if (row.check_in) {
+        const isLate = (row.status || '').toLowerCase() === 'late'
+        events.push({
+          id: `cin-${row.id}`,
+          attendanceId: row.id,
+          type: 'check_in',
+          employeeId: employeeCode,
+          employeeDbId: row.employee_id,
+          employeeName,
+          avatar,
+          designation,
+          timestamp: row.check_in,
+          checkInTime: row.check_in,
+          checkOutTime: row.check_out,
+          timeFormatted: formatTime(row.check_in),
+          date: row.attendance_date,
+          status: isLate ? 'Late' : 'On Time',
+          badge: isLate ? 'Late Check-in' : 'Checked In',
+          badgeColor: isLate ? 'amber' : 'emerald',
+        })
+      }
+
+      if (row.check_out) {
+        const durationText = formatWorkedDuration(
+          row.check_in,
+          row.check_out,
+          row.worked_minutes,
+          row.break_minutes
+        )
+        const workedMins = row.worked_minutes || 0
+        events.push({
+          id: `cout-${row.id}`,
+          attendanceId: row.id,
+          type: 'check_out',
+          employeeId: employeeCode,
+          employeeDbId: row.employee_id,
+          employeeName,
+          avatar,
+          designation,
+          timestamp: row.check_out,
+          checkInTime: row.check_in,
+          checkOutTime: row.check_out,
+          timeFormatted: formatTime(row.check_out),
+          date: row.attendance_date,
+          workedMinutes: workedMins,
+          workedDuration: durationText,
+          status: 'Shift Completed',
+          badge: 'Checked Out',
+          badgeColor: 'blue',
+        })
+      }
+    }
+
+    events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    return events
+  } catch (err) {
+    console.error('Failed to query attendance feed via REST fallback:', err)
+    return []
+  }
+}
+

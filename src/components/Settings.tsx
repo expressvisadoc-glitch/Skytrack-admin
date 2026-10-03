@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import {
   getAdminProfile,
+  getOrganizationData,
   updateAdminPassword,
   updateEmployeeDetails,
   type SkyTrackEmployee,
+  type OrganizationData,
 } from '../lib/api'
 
 interface SettingsProps {
@@ -14,6 +16,7 @@ interface SettingsProps {
 export function Settings({ onLogout }: SettingsProps) {
   const { logout, employee, token } = useAuth()
   const [profile, setProfile] = useState<SkyTrackEmployee | null>(employee)
+  const [orgData, setOrgData] = useState<OrganizationData | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
   const [currentPwd, setCurrentPwd] = useState('')
@@ -44,6 +47,10 @@ export function Settings({ onLogout }: SettingsProps) {
       .catch((err) => {
         console.warn('Could not refresh admin profile:', err)
       })
+
+    getOrganizationData(token)
+      .then((data) => setOrgData(data))
+      .catch((err) => console.warn('Could not fetch org data:', err))
   }, [token, employee])
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
@@ -132,7 +139,9 @@ export function Settings({ onLogout }: SettingsProps) {
   const adminEmail = activeProfile?.email || '—'
   const adminEmpId = activeProfile?.employee_id || activeProfile?.employeeId || activeProfile?.id || '—'
   const adminRole = activeProfile?.designation || activeProfile?.role || activeProfile?.role_name || 'System Administrator'
-  const adminDepartment = activeProfile?.department || 'Operations'
+  const adminDepartment = activeProfile?.department_id && orgData
+    ? orgData.departments.find(d => d.id === activeProfile.department_id)?.department_name || activeProfile?.department || 'Department Not Set'
+    : activeProfile?.department || 'Department Not Set'
   const defaultAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(
     adminName
   )}&background=f1f5f9&color=475569&bold=true`

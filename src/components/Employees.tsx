@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import {
   getEmployeesDirectory,
+  createEmployee,
   type EmployeeDirectoryItem,
 } from '../lib/api'
 import { EmployeeDetails } from './EmployeeDetails'
@@ -15,6 +16,80 @@ export function Employees() {
   const [currentFilter, setCurrentFilter] = useState<'all' | 'present' | 'leave' | 'absent'>('all')
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDirectoryItem | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  // Add Employee State
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isAdding, setIsAdding] = useState(false)
+  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', confirmPassword: '' })
+  const [addError, setAddError] = useState<string | null>(null)
+  const [successToast, setSuccessToast] = useState<{ message: string; employeeId: string } | null>(null)
+
+  useEffect(() => {
+    if (successToast) {
+      const timer = setTimeout(() => {
+        setSuccessToast(null)
+      }, 6000)
+      return () => clearTimeout(timer)
+    }
+  }, [successToast])
+
+  const handleAddEmployee = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAddError(null)
+
+    if (!addForm.name.trim() || !addForm.email.trim() || !addForm.password) {
+      setAddError('All fields are required.')
+      return
+    }
+    if (addForm.password !== addForm.confirmPassword) {
+      setAddError('Passwords do not match.')
+      return
+    }
+
+    if (!token) return
+
+    setIsAdding(true)
+    try {
+      const result = await createEmployee(token, {
+        name: addForm.name,
+        email: addForm.email,
+        password: addForm.password
+      })
+      if (result.success && result.employee) {
+        const generatedEmployeeId = result.employee.employee_id
+        setIsAddModalOpen(false)
+        setAddForm({ name: '', email: '', password: '', confirmPassword: '' })
+        setAddError(null)
+        setSuccessToast({
+          message: result.message || 'Employee created successfully.',
+          employeeId: generatedEmployeeId,
+        })
+        loadEmployees()
+      } else if (result.success && (result as any).employee_id) {
+        const generatedEmployeeId = (result as any).employee_id
+        setIsAddModalOpen(false)
+        setAddForm({ name: '', email: '', password: '', confirmPassword: '' })
+        setAddError(null)
+        setSuccessToast({
+          message: result.message || 'Employee created successfully.',
+          employeeId: generatedEmployeeId,
+        })
+        loadEmployees()
+      } else {
+        setAddError(result.message || 'Failed to create employee.')
+      }
+    } catch (err: any) {
+      setAddError(err.message || 'An error occurred while creating employee.')
+    } finally {
+      setIsAdding(false)
+    }
+  }
+
+  const closeAddModal = () => {
+    setIsAddModalOpen(false)
+    setAddError(null)
+    setAddForm({ name: '', email: '', password: '', confirmPassword: '' })
+  }
 
   const loadEmployees = useCallback(async () => {
     if (!token) return
@@ -117,6 +192,13 @@ export function Employees() {
           </div>
 
           <div className="flex items-center gap-2.5 self-start lg:self-auto">
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 text-white font-bold text-xs shadow-md shadow-red-600/20 hover:bg-red-700 transition-colors cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-sm">person_add</span>
+              <span>Add Employee</span>
+            </button>
             <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200/80 shadow-xs">
               <span className="w-2 h-2 rounded-full bg-red-600"></span>
               <span className="text-xs font-bold text-slate-800">
@@ -235,6 +317,27 @@ export function Employees() {
             </div>
           </div>
         </div>
+
+        {/* Success State Banner */}
+        {successToast && (
+          <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center justify-between shadow-xs animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <span className="material-symbols-outlined text-emerald-600 text-lg">check_circle</span>
+              <span>
+                {successToast.message} Employee ID:{' '}
+                <strong className="font-mono bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded border border-emerald-300">
+                  {successToast.employeeId}
+                </strong>
+              </span>
+            </div>
+            <button
+              onClick={() => setSuccessToast(null)}
+              className="text-emerald-700 hover:text-emerald-900 text-xs font-bold px-2 py-1 rounded-lg hover:bg-emerald-100 transition-colors cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Error State */}
         {error && (
@@ -448,6 +551,136 @@ export function Employees() {
           </div>
         </div>
       </div>
+
+      {/* Floating Success Toast */}
+      {successToast && (
+        <div className="fixed top-24 right-8 z-50 flex items-center gap-3.5 px-5 py-4 rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-700/80 animate-in fade-in slide-in-from-top-3 max-w-md">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+            <span className="material-symbols-outlined text-2xl">check_circle</span>
+          </div>
+          <div className="flex flex-col min-w-0 pr-1">
+            <span className="text-xs font-bold text-slate-100">
+              {successToast.message || 'Employee created successfully.'}
+            </span>
+            <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-300">
+              <span>Employee ID:</span>
+              <span className="font-mono font-extrabold text-emerald-400 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700 tracking-wider">
+                {successToast.employeeId}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessToast(null)}
+            className="w-7 h-7 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors cursor-pointer shrink-0 ml-2"
+          >
+            <span className="material-symbols-outlined text-base">close</span>
+          </button>
+        </div>
+      )}
+
+      {/* Add Employee Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="glass-card rounded-3xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-5 border border-white bg-white">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-sm">person_add</span>
+                </div>
+                <span className="font-bold text-base text-slate-900">Add New Employee</span>
+              </div>
+              <button
+                onClick={closeAddModal}
+                className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-slate-200 hover:text-slate-800 transition-colors cursor-pointer"
+                type="button"
+              >
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleAddEmployee} className="flex flex-col gap-4">
+              {addError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[16px]">error</span>
+                  <span>{addError}</span>
+                </div>
+              )}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
+                  <input
+                    type="text"
+                    value={addForm.name}
+                    onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:bg-white focus:border-red-400 focus:outline-none transition-all"
+                    placeholder="e.g. John Doe"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    value={addForm.email}
+                    onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:bg-white focus:border-red-400 focus:outline-none transition-all"
+                    placeholder="john.doe@example.com"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Password</label>
+                  <input
+                    type="password"
+                    value={addForm.password}
+                    onChange={(e) => setAddForm({ ...addForm, password: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:bg-white focus:border-red-400 focus:outline-none transition-all"
+                    placeholder="Enter a strong password"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Confirm Password</label>
+                  <input
+                    type="password"
+                    value={addForm.confirmPassword}
+                    onChange={(e) => setAddForm({ ...addForm, confirmPassword: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm focus:bg-white focus:border-red-400 focus:outline-none transition-all"
+                    placeholder="Re-enter password"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeAddModal}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition-colors cursor-pointer"
+                  disabled={isAdding}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition-colors disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
+                  disabled={isAdding}
+                >
+                  {isAdding ? (
+                    <>
+                      <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin"></span>
+                      Creating...
+                    </>
+                  ) : (
+                    'Create Account'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

@@ -70,11 +70,19 @@ export function LeaveManagement() {
     return submissions.find((s) => s.id === selectedId) || submissions[0] || null
   }, [submissions, selectedId])
 
-  const handleApprove = async (id: string) => {
+  const handleApprove = async (leaveOrId: LeaveSubmissionRecord | string) => {
     if (!token) return
-    setIsUpdating(id)
+    const leave =
+      typeof leaveOrId === 'string'
+        ? submissions.find((s) => s.id === leaveOrId || s.request_id === leaveOrId || s.requestId === leaveOrId)
+        : leaveOrId
+    const requestId = leave?.request_id || leave?.requestId || (typeof leaveOrId === 'string' ? leaveOrId : leave?.id)
+    const updateKey = leave?.id || (typeof leaveOrId === 'string' ? leaveOrId : '')
+    if (!requestId) return
+
+    setIsUpdating(updateKey)
     try {
-      await approveLeave(token, id)
+      await approveLeave(token, requestId)
       // Since it's updated via Edge Function, let's refresh all submissions
       // so we get the accurate backend state (e.g. lopDays, etc.)
       await loadSubmissions()
@@ -86,11 +94,19 @@ export function LeaveManagement() {
     }
   }
 
-  const handleReject = async (id: string) => {
+  const handleReject = async (leaveOrId: LeaveSubmissionRecord | string) => {
     if (!token) return
-    setIsUpdating(id)
+    const leave =
+      typeof leaveOrId === 'string'
+        ? submissions.find((s) => s.id === leaveOrId || s.request_id === leaveOrId || s.requestId === leaveOrId)
+        : leaveOrId
+    const requestId = leave?.request_id || leave?.requestId || (typeof leaveOrId === 'string' ? leaveOrId : leave?.id)
+    const updateKey = leave?.id || (typeof leaveOrId === 'string' ? leaveOrId : '')
+    if (!requestId) return
+
+    setIsUpdating(updateKey)
     try {
-      await rejectLeave(token, id)
+      await rejectLeave(token, requestId)
       await loadSubmissions()
     } catch (err: any) {
       console.error('Error rejecting leave:', err)
@@ -424,7 +440,7 @@ export function LeaveManagement() {
                                       disabled={isThisUpdating}
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        handleApprove(row.id)
+                                        handleApprove(row)
                                       }}
                                       className="p-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer disabled:opacity-50"
                                       title="Approve Leave"
@@ -438,7 +454,7 @@ export function LeaveManagement() {
                                       disabled={isThisUpdating}
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        handleReject(row.id)
+                                        handleReject(row)
                                       }}
                                       className="p-1.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 transition-colors cursor-pointer disabled:opacity-50"
                                       title="Reject Leave"
@@ -652,7 +668,7 @@ export function LeaveManagement() {
                   <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
                     <button
                       disabled={isUpdating === selectedItem.id}
-                      onClick={() => handleApprove(selectedItem.id)}
+                      onClick={() => handleApprove(selectedItem)}
                       className="w-full flex-1 h-11 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
                       type="button"
                     >
@@ -663,7 +679,7 @@ export function LeaveManagement() {
                     </button>
                     <button
                       disabled={isUpdating === selectedItem.id}
-                      onClick={() => handleReject(selectedItem.id)}
+                      onClick={() => handleReject(selectedItem)}
                       className="w-full sm:w-auto px-4 h-11 rounded-2xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
                       type="button"
                     >
