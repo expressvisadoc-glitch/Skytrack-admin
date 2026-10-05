@@ -37,59 +37,9 @@ export interface AttendanceAlertItem {
   status: 'pending' | 'acknowledged'
 }
 
-const DEFAULT_PASSWORD_REQUESTS: PasswordResetRequest[] = [
-  {
-    id: 'pwd-req-101',
-    employeeId: 'SKY-1042',
-    name: 'Vikram Malhotra',
-    role: 'Security Screening Officer',
-    department: 'Aviation Security',
-    email: 'v.malhotra@skypass.aero',
-    requestedAt: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
-    timeAgo: '18m ago',
-    reason: 'Account locked on Android device after multiple failed attempts',
-    status: 'pending',
-  },
-  {
-    id: 'pwd-req-102',
-    employeeId: 'SKY-1077',
-    name: 'Ananya Deshmukh',
-    role: 'Ramp Operations Agent',
-    department: 'Ground Operations',
-    email: 'a.deshmukh@skypass.aero',
-    requestedAt: new Date(Date.now() - 54 * 60 * 1000).toISOString(),
-    timeAgo: '54m ago',
-    reason: 'Forgot password after mobile OS update',
-    status: 'pending',
-  },
-]
+const DEFAULT_PASSWORD_REQUESTS: PasswordResetRequest[] = []
 
-const DEFAULT_ATTENDANCE_ALERTS: AttendanceAlertItem[] = [
-  {
-    id: 'att-alert-201',
-    employeeId: 'SKY-1018',
-    name: 'Amal Ramachandran',
-    type: 'geofence',
-    title: 'Geofence Exception Detected',
-    description: 'Checked in 450m outside DXB Terminal 2 authorized perimeter at 08:14 AM',
-    location: 'DXB Terminal 2 North Gate',
-    timeAgo: '2h ago',
-    severity: 'high',
-    status: 'pending',
-  },
-  {
-    id: 'att-alert-202',
-    employeeId: 'SKY-1055',
-    name: 'Kavita Nair',
-    type: 'missing_checkout',
-    title: 'Missing Shift Check-out',
-    description: 'No check-out timestamp recorded for yesterday evening shift (Shift B)',
-    location: 'Terminal 1 Concourse C',
-    timeAgo: 'Yesterday',
-    severity: 'medium',
-    status: 'pending',
-  },
-]
+const DEFAULT_ATTENDANCE_ALERTS: AttendanceAlertItem[] = []
 
 const STORAGE_KEY_PWD_REQUESTS = 'skytrack_admin_password_requests'
 const STORAGE_KEY_ATT_ALERTS = 'skytrack_admin_attendance_alerts'

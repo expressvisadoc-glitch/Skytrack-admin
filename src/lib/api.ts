@@ -3,17 +3,11 @@
  * Connects to the existing SkyTrack Supabase backend.
  */
 
-const SKYTRACK_API_URL =
-  import.meta.env.VITE_SKYTRACK_API_URL ||
-  (import.meta.env.DEV ? '/api/skytrack' : 'https://cwtrrtbodqctntkpnjlv.supabase.co/functions/v1/skytrack-api')
+const SKYTRACK_API_URL = import.meta.env.VITE_SKYTRACK_API_URL || ''
 
-const SUPABASE_REST_URL =
-  import.meta.env.VITE_SUPABASE_REST_URL ||
-  'https://cwtrrtbodqctntkpnjlv.supabase.co/rest/v1'
+const SUPABASE_REST_URL = import.meta.env.VITE_SUPABASE_REST_URL || ''
 
-const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  'sb_publishable_hvKs5JBFtNafLUmmsD0WHw_6mWC6oEc'
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
 
 export interface SkyTrackEmployee {
   id?: string

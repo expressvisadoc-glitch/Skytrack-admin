@@ -8,7 +8,7 @@ interface LoginProps {
 export function Login({ onLoginSuccess }: LoginProps) {
   const { login } = useAuth()
   const [credential, setCredential] = useState(() => localStorage.getItem('skytrack_admin_credential') || '')
-  const [password, setPassword] = useState(() => localStorage.getItem('skytrack_admin_password') || '')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [rememberDevice, setRememberDevice] = useState(() => localStorage.getItem('skytrack_admin_remember') === 'true' || localStorage.getItem('skytrack_admin_remember') === null)
   const [statusState, setStatusState] = useState<'idle' | 'verifying' | 'approved'>('idle')
@@ -26,11 +26,9 @@ export function Login({ onLoginSuccess }: LoginProps) {
 
     if (rememberDevice) {
       localStorage.setItem('skytrack_admin_credential', credential.trim())
-      localStorage.setItem('skytrack_admin_password', password)
       localStorage.setItem('skytrack_admin_remember', 'true')
     } else {
       localStorage.removeItem('skytrack_admin_credential')
-      localStorage.removeItem('skytrack_admin_password')
       localStorage.setItem('skytrack_admin_remember', 'false')
     }
 
