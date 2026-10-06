@@ -39,11 +39,15 @@ Deno.serve(async (req) => {
     const action = String(body.action ?? "").trim();
 
     // =========================================================
-    // LOGIN
+    // LOGIN & PUBLIC ACCESS
     // =========================================================
 
     if (action === "login") {
       return await handleLogin(body);
+    }
+
+    if (action === "public_holidays") {
+      return await handlePublicHolidays();
     }
 
     // =========================================================
@@ -235,6 +239,10 @@ Deno.serve(async (req) => {
       return await handlePublicHolidays();
     }
 
+    if (action === "seed_public_holidays") {
+      return await handleSeedPublicHolidays(employee);
+    }
+
     if (action === "organization_data") {
       return await handleOrganizationData(employee);
     }
@@ -244,6 +252,10 @@ Deno.serve(async (req) => {
         employee,
         body
       );
+    }
+
+    if (action === "update_employee_id") {
+      return await handleUpdateEmployeeId(employee, body);
     }
 
     // =========================================================
@@ -1037,8 +1049,95 @@ async function handleAttendanceFeed(body: any) {
 // PUBLIC HOLIDAYS
 // =============================================================
 
+const MANDATORY_INDIAN_KERALA_HOLIDAYS = [
+  // 2026 Mandatory Indian & Kerala Public Holidays
+  { code: 'HOL-IN-2026-001', name: 'Republic Day', date: '2026-01-26', type: 'gazetted', notes: 'Mandatory central statutory closure across operations (Republic Day)' },
+  { code: 'HOL-IN-2026-002', name: 'Maha Shivratri', date: '2026-02-15', type: 'gazetted', notes: 'Gazetted holiday for Maha Shivratri' },
+  { code: 'HOL-IN-2026-003', name: 'Id-ul-Fitr (Ramzan)', date: '2026-03-20', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Id-ul-Fitr)' },
+  { code: 'HOL-IN-2026-004', name: 'Good Friday', date: '2026-04-03', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Good Friday)' },
+  { code: 'HOL-IN-2026-005', name: 'Dr. B.R. Ambedkar Jayanti / Vishu', date: '2026-04-14', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Vishu / Ambedkar Jayanti)' },
+  { code: 'HOL-IN-2026-006', name: 'May Day (International Workers\' Day)', date: '2026-05-01', type: 'gazetted', notes: 'Mandatory statutory closure across Kerala and operations (May Day)' },
+  { code: 'HOL-IN-2026-007', name: 'Bakrid (Id-ul-Zuha)', date: '2026-05-27', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Bakrid)' },
+  { code: 'HOL-IN-2026-008', name: 'Muharram', date: '2026-06-26', type: 'gazetted', notes: 'Gazetted holiday for Muharram' },
+  { code: 'HOL-IN-2026-009', name: 'Independence Day', date: '2026-08-15', type: 'gazetted', notes: 'Mandatory central statutory closure across operations (Independence Day)' },
+  { code: 'HOL-IN-2026-010', name: 'First Onam', date: '2026-08-25', type: 'gazetted', notes: 'Kerala State festival holiday (First Onam)' },
+  { code: 'HOL-IN-2026-011', name: 'Thiruvonam', date: '2026-08-26', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Thiruvonam)' },
+  { code: 'HOL-IN-2026-012', name: 'Third Onam / Milad-un-Nabi', date: '2026-08-27', type: 'gazetted', notes: 'Kerala State festival / Gazetted holiday (Third Onam / Prophet\'s Birthday)' },
+  { code: 'HOL-IN-2026-013', name: 'Fourth Onam / Sree Narayana Guru Jayanti', date: '2026-08-28', type: 'gazetted', notes: 'Kerala State festival holiday (Sree Narayana Guru Jayanti)' },
+  { code: 'HOL-IN-2026-014', name: 'Sree Narayana Guru Samadhi', date: '2026-09-21', type: 'gazetted', notes: 'Kerala State holiday (Sree Narayana Guru Samadhi)' },
+  { code: 'HOL-IN-2026-015', name: 'Mahatma Gandhi Jayanti', date: '2026-10-02', type: 'gazetted', notes: 'Mandatory central statutory closure across operations (Gandhi Jayanti)' },
+  { code: 'HOL-IN-2026-016', name: 'Mahanavami (Ayudha Pooja)', date: '2026-10-19', type: 'gazetted', notes: 'Kerala State / Gazetted holiday for Mahanavami' },
+  { code: 'HOL-IN-2026-017', name: 'Vijayadashami (Dussehra)', date: '2026-10-20', type: 'gazetted', notes: 'Kerala State / Gazetted holiday for Vijayadashami' },
+  { code: 'HOL-IN-2026-018', name: 'Deepavali (Diwali)', date: '2026-11-08', type: 'gazetted', notes: 'Gazetted festival holiday for Deepavali' },
+  { code: 'HOL-IN-2026-019', name: 'Christmas', date: '2026-12-25', type: 'gazetted', notes: 'Mandatory statutory closure across operations (Christmas)' },
+
+  // 2027 Upcoming Mandatory Indian & Kerala Public Holidays
+  { code: 'HOL-IN-2027-001', name: 'New Year\'s Day', date: '2027-01-01', type: 'restricted', notes: 'Optional roster choice for regional hubs (New Year\'s Day)' },
+  { code: 'HOL-IN-2027-002', name: 'Republic Day', date: '2027-01-26', type: 'gazetted', notes: 'Mandatory central statutory closure across operations (Republic Day)' },
+  { code: 'HOL-IN-2027-003', name: 'Maha Shivratri', date: '2027-03-06', type: 'gazetted', notes: 'Gazetted holiday for Maha Shivratri' },
+  { code: 'HOL-IN-2027-004', name: 'Id-ul-Fitr (Ramzan)', date: '2027-03-10', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Id-ul-Fitr)' },
+  { code: 'HOL-IN-2027-005', name: 'Good Friday', date: '2027-03-26', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Good Friday)' },
+  { code: 'HOL-IN-2027-006', name: 'Dr. B.R. Ambedkar Jayanti / Vishu', date: '2027-04-14', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Vishu / Ambedkar Jayanti)' },
+  { code: 'HOL-IN-2027-007', name: 'May Day (International Workers\' Day)', date: '2027-05-01', type: 'gazetted', notes: 'Mandatory statutory closure across Kerala and operations (May Day)' },
+  { code: 'HOL-IN-2027-008', name: 'Bakrid (Id-ul-Zuha)', date: '2027-05-16', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Bakrid)' },
+  { code: 'HOL-IN-2027-009', name: 'Muharram', date: '2027-07-16', type: 'gazetted', notes: 'Gazetted holiday for Muharram' },
+  { code: 'HOL-IN-2027-010', name: 'Independence Day', date: '2027-08-15', type: 'gazetted', notes: 'Mandatory central statutory closure across operations (Independence Day)' },
+  { code: 'HOL-IN-2027-011', name: 'Thiruvonam (Onam)', date: '2027-09-13', type: 'gazetted', notes: 'Mandatory statutory closure in Kerala (Thiruvonam)' },
+  { code: 'HOL-IN-2027-012', name: 'Third Onam / Sree Narayana Guru Jayanti', date: '2027-09-14', type: 'gazetted', notes: 'Kerala State festival holiday (Sree Narayana Guru Jayanti)' },
+  { code: 'HOL-IN-2027-013', name: 'Sree Narayana Guru Samadhi', date: '2027-09-21', type: 'gazetted', notes: 'Kerala State holiday (Sree Narayana Guru Samadhi)' },
+  { code: 'HOL-IN-2027-014', name: 'Mahatma Gandhi Jayanti', date: '2027-10-02', type: 'gazetted', notes: 'Mandatory central statutory closure across operations (Gandhi Jayanti)' },
+  { code: 'HOL-IN-2027-015', name: 'Mahanavami (Ayudha Pooja)', date: '2027-10-09', type: 'gazetted', notes: 'Kerala State / Gazetted holiday for Mahanavami' },
+  { code: 'HOL-IN-2027-016', name: 'Vijayadashami (Dussehra)', date: '2027-10-10', type: 'gazetted', notes: 'Kerala State / Gazetted holiday for Vijayadashami' },
+  { code: 'HOL-IN-2027-017', name: 'Deepavali (Diwali)', date: '2027-10-29', type: 'gazetted', notes: 'Gazetted festival holiday for Deepavali' },
+  { code: 'HOL-IN-2027-018', name: 'Christmas', date: '2027-12-25', type: 'gazetted', notes: 'Mandatory statutory closure across operations (Christmas)' },
+];
+
+async function seedHolidaysInternal() {
+  for (const item of MANDATORY_INDIAN_KERALA_HOLIDAYS) {
+    const { data: existing } = await adminClient
+      .from("public_holidays")
+      .select("id")
+      .eq("holiday_date", item.date)
+      .maybeSingle();
+
+    if (!existing) {
+      const { data: inserted, error } = await adminClient
+        .from("public_holidays")
+        .insert({
+          holiday_code: item.code,
+          holiday_name: item.name,
+          holiday_date: item.date,
+          holiday_type: item.type,
+          is_paid: true,
+          status: "published",
+          notes: item.notes
+        })
+        .select()
+        .single();
+
+      if (!error && inserted?.id) {
+        const branches = ["dl", "mh", "ka", "kl", "ts"].map(b => ({
+          holiday_id: inserted.id,
+          branch_code: b
+        }));
+        await adminClient.from("public_holiday_branches").insert(branches);
+      }
+    }
+  }
+}
+
+async function handleSeedPublicHolidays(employee: any) {
+  try {
+    await ensureAdmin(employee);
+    await seedHolidaysInternal();
+    return await handlePublicHolidays();
+  } catch (err: any) {
+    return json({ success: false, message: err.message }, 500);
+  }
+}
+
 async function handlePublicHolidays() {
-  const {
+  let {
     data: companyHolidays,
     error: companyError
   } = await adminClient
@@ -1077,6 +1176,31 @@ async function handlePublicHolidays() {
       },
       500
     );
+  }
+
+  // Auto-seed mandatory holidays if database is empty
+  if (!companyHolidays || companyHolidays.length === 0) {
+    try {
+      await seedHolidaysInternal();
+      const refetched = await adminClient
+        .from("public_holidays")
+        .select(`
+          id,
+          holiday_code,
+          holiday_name,
+          holiday_date,
+          holiday_type,
+          status
+        `)
+        .eq("status", "published")
+        .order("holiday_date", { ascending: true });
+
+      if (refetched.data) {
+        companyHolidays = refetched.data;
+      }
+    } catch (seedErr) {
+      console.error("Auto-seeding mandatory holidays failed:", seedErr);
+    }
   }
 
   const {
@@ -2915,6 +3039,73 @@ async function handleUpdateEmployeeRole(employee: any, body: any) {
     success: true,
     employee: data
   });
+}
+
+async function handleUpdateEmployeeId(employee: any, body: any): Promise<Response> {
+  try {
+    await ensureAdmin(employee);
+
+    const targetId = String(body.targetId || "").trim();
+    const newEmployeeId = String(body.newEmployeeId || "").trim();
+
+    if (!targetId) {
+      return json({ success: false, message: "Target employee UUID is required." }, 400);
+    }
+
+    if (!newEmployeeId) {
+      return json({ success: false, message: "New Employee ID is required." }, 400);
+    }
+
+    const { data: existing, error: checkError } = await adminClient
+      .from("employees")
+      .select("id")
+      .eq("employee_id", newEmployeeId)
+      .maybeSingle();
+
+    if (checkError) {
+      return json({ success: false, message: checkError.message }, 500);
+    }
+
+    if (existing && existing.id !== targetId) {
+      return json({ success: false, message: "Employee ID is already assigned to another employee." }, 400);
+    }
+
+    const { data: targetEmployee, error: targetError } = await adminClient
+      .from("employees")
+      .select("id, employee_id")
+      .eq("id", targetId)
+      .maybeSingle();
+
+    if (targetError || !targetEmployee) {
+      return json({ success: false, message: "Employee not found." }, 404);
+    }
+
+    const { error: updateError } = await adminClient
+      .from("employees")
+      .update({
+        employee_id: newEmployeeId,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", targetId);
+
+    if (updateError) {
+      return json({ success: false, message: updateError.message }, 500);
+    }
+
+    return json({
+      success: true,
+      message: "Employee ID updated successfully.",
+      employee: {
+        id: targetId,
+        employee_id: newEmployeeId
+      }
+    });
+  } catch (error) {
+    return json({
+      success: false,
+      message: error instanceof Error ? error.message : "Failed to update Employee ID."
+    }, 500);
+  }
 }
 
 // =============================================================

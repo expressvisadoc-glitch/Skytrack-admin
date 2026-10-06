@@ -53,7 +53,7 @@ export function Dashboard() {
   // Loading State with Skeleton Structure matching the exact layout
   if (isLoading && !data) {
     return (
-      <main className="relative w-full pt-28 px-8 pb-14">
+      <main className="relative w-full pt-28 px-4 sm:px-8 pb-14">
         <div className="flex flex-col w-full gap-7 max-w-[1600px] mx-auto animate-pulse">
           {/* Header Skeleton */}
           <div className="h-28 rounded-3xl bg-white/80 border border-slate-200/70 p-6 flex items-center justify-between">
@@ -99,7 +99,7 @@ export function Dashboard() {
   // Error State
   if (error && !data) {
     return (
-      <main className="relative w-full pt-28 px-8 pb-14 min-h-[70vh] flex items-center justify-center">
+      <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-[70vh] flex items-center justify-center">
         <div className="glass-card rounded-3xl p-8 max-w-md w-full text-center flex flex-col items-center gap-4 border border-red-200">
           <div className="w-16 h-16 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center">
             <span className="material-symbols-outlined text-[32px]">warning</span>
@@ -143,7 +143,7 @@ export function Dashboard() {
     })
 
   return (
-    <main className="relative w-full pt-28 px-8 pb-14">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14">
       <div className="flex flex-col w-full gap-7 max-w-[1600px] mx-auto">
         {/* Top Operational Hero Card / Greeting Banner */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-3xl bg-white/90 backdrop-blur-xl border border-white/80 shadow-[0_10px_30px_rgba(0,0,0,0.02)]">

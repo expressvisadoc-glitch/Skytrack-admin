@@ -88,7 +88,7 @@ export function Organization() {
 
   if (isLoading) {
     return (
-      <main className="relative w-full pt-28 px-8 pb-14 min-h-screen flex items-center justify-center">
+      <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
           <p className="text-sm font-semibold text-slate-500">Loading Organization Data...</p>
@@ -98,7 +98,7 @@ export function Organization() {
   }
 
   return (
-    <main className="relative w-full pt-28 px-8 pb-14 bg-[#faf9fd] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#faf9fd] min-h-screen">
       <div className="max-w-5xl mx-auto flex flex-col gap-6">
         {/* Page Breadcrumb & Title */}
         <div className="flex flex-col gap-2">

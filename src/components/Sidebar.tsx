@@ -3,17 +3,27 @@ import { useAuth } from '../contexts/AuthContext'
 interface SidebarProps {
   activeTab: string
   onSelectTab: (tab: string) => void
+  isOpen?: boolean
+  onClose?: () => void
 }
 
-export function Sidebar({ activeTab, onSelectTab }: SidebarProps) {
+interface NavItem {
+  id: string
+  label: string
+  icon: string
+  badge?: string
+  badgeColor?: string
+}
+
+export function Sidebar({ activeTab, onSelectTab, isOpen, onClose }: SidebarProps) {
   const { employee } = useAuth()
   const isSuperAdmin = employee?.role === 'super_admin'
 
-  const navItems = [
+  const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
     { id: 'employees', label: 'Employees', icon: 'badge' },
     { id: 'attendance', label: 'Attendance', icon: 'how_to_reg' },
-    { id: 'leave-management', label: 'Leave Management', icon: 'event_busy', badge: '8', badgeColor: 'bg-red-100 text-red-600' },
+    { id: 'leave-management', label: 'Leave Management', icon: 'event_busy' },
     { id: 'public-holidays', label: 'Public Holidays', icon: 'event_available' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
     { id: 'organization', label: 'Organization', icon: 'corporate_fare' },
@@ -21,27 +31,38 @@ export function Sidebar({ activeTab, onSelectTab }: SidebarProps) {
   ]
 
   return (
-    <aside className="fixed left-0 top-0 h-full w-72 bg-white/80 backdrop-blur-2xl border-r border-slate-200/70 z-50 flex flex-col justify-between shadow-[2px_0_24px_rgba(15,23,42,0.03)]">
-      <div className="flex flex-col">
-        {/* Top Brand Header */}
-        <div className="h-20 px-6 flex items-center justify-between border-b border-slate-100/80">
-          <div className="flex items-center gap-3.5">
-            {/* Sleek Emblem */}
-            <div className="relative flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 shadow-md shadow-red-500/25 ring-4 ring-red-50 text-white group cursor-pointer transition-transform hover:scale-105 font-extrabold text-lg">
-              S
-              <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 ring-2 ring-white"></div>
+    <>
+      {/* Mobile Overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 lg:hidden transition-opacity"
+          onClick={onClose}
+        />
+      )}
+      <aside className={`fixed left-0 top-0 h-full w-72 bg-white/80 backdrop-blur-2xl border-r border-slate-200/70 z-50 flex flex-col justify-between shadow-[2px_0_24px_rgba(15,23,42,0.03)] transition-transform duration-300 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        <div className="flex flex-col">
+          {/* Top Brand Header */}
+          <div className="h-20 px-6 flex items-center justify-between border-b border-slate-100/80">
+            <div className="flex items-center gap-3.5">
+              {/* Sleek Emblem */}
+              <div className="relative flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 shadow-md shadow-red-500/25 ring-4 ring-red-50 text-white group cursor-pointer transition-transform hover:scale-105 font-extrabold text-lg">
+                S
+                <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 ring-2 ring-white"></div>
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-slate-900 tracking-tight text-base leading-none">SkyTrack</span>
+                <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold tracking-wider bg-red-50 text-red-600 border border-red-100 w-fit">
+                  By Skypass Visa Services
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="font-bold text-slate-900 tracking-tight text-base leading-none">SkyTrack</span>
-              <span className="inline-flex items-center mt-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold tracking-wider bg-red-50 text-red-600 border border-red-100 w-fit">
-                By Skypass Visa Services
-              </span>
-            </div>
+            <button onClick={onClose} className="lg:hidden w-8 h-8 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer">
+              <span className="material-symbols-outlined text-[19px]">close</span>
+            </button>
+            <button className="hidden lg:flex w-8 h-8 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 items-center justify-center transition-colors cursor-pointer">
+              <span className="material-symbols-outlined text-[19px]">unfold_more</span>
+            </button>
           </div>
-          <button className="w-8 h-8 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer">
-            <span className="material-symbols-outlined text-[19px]">unfold_more</span>
-          </button>
-        </div>
 
         {/* Navigation Section */}
         <div className="px-5 pt-5 pb-2">
@@ -101,5 +122,6 @@ export function Sidebar({ activeTab, onSelectTab }: SidebarProps) {
         </div>
       </div>
     </aside>
+    </>
   )
 }

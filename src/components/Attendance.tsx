@@ -114,7 +114,7 @@ export function Attendance() {
   }
 
   return (
-    <main className="relative min-h-screen bg-[#faf9fd] w-full px-8 py-7 pt-24">
+    <main className="relative min-h-screen bg-[#faf9fd] w-full px-4 sm:px-8 py-7 pt-24">
       {downloadToast && selectedRecord && (
         <div className="fixed top-24 right-8 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-slate-700 animate-in fade-in slide-in-from-top-2">
           <span className="material-symbols-outlined text-emerald-400 text-[20px]">

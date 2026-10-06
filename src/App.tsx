@@ -12,11 +12,39 @@ import { Login } from './components/Login'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AdminManagement } from './components/AdminManagement'
 import { useAuth } from './contexts/AuthContext'
+import { useEffect } from 'react'
 import './index.css'
+
+const VALID_TABS = [
+  'dashboard',
+  'employees',
+  'attendance',
+  'leave-management',
+  'public-holidays',
+  'settings',
+  'organization',
+  'admin-management',
+]
+
+function getInitialTab(): string {
+  const path = window.location.pathname.replace(/^\/+/, '').split('/')[0]
+  if (!path || path === 'login') return 'dashboard'
+  if (path === 'leaves') return 'leave-management'
+  return VALID_TABS.includes(path) ? path : 'dashboard'
+}
 
 function App() {
   const { session, isLoading } = useAuth()
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'employees' | 'attendance' | 'leave-management' | 'public-holidays' | 'settings' | 'organization' | string>('dashboard')
+  const [activeTab, setActiveTab] = useState<string>(getInitialTab)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    const onPopState = () => {
+      setActiveTab(getInitialTab())
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
 
   if (isLoading) {
     return (
@@ -33,14 +61,31 @@ function App() {
     return <Login onLoginSuccess={() => {}} />
   }
 
+  const handleSelectTab = (tab: string) => {
+    setActiveTab(tab)
+    setIsSidebarOpen(false)
+    const targetPath = tab === 'dashboard' ? '/' : `/${tab}`
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState(null, '', targetPath)
+    }
+  }
+
   return (
     <ProtectedRoute>
-      <div className="bg-[#f6f8fc] text-[#181d27] antialiased min-h-screen selection:bg-brand-100 selection:text-brand-600">
-        <Sidebar activeTab={activeTab} onSelectTab={setActiveTab} />
+      <div className="bg-[#f6f8fc] text-[#181d27] antialiased min-h-screen selection:bg-brand-100 selection:text-brand-600 overflow-hidden lg:overflow-auto">
+        <Sidebar 
+          activeTab={activeTab} 
+          onSelectTab={handleSelectTab} 
+          isOpen={isSidebarOpen} 
+          onClose={() => setIsSidebarOpen(false)} 
+        />
 
         {/* Main Body Content Frame */}
-        <div className="pl-72">
-          <Header onSelectTab={setActiveTab} />
+        <div className="lg:pl-72 transition-all duration-300">
+          <Header 
+            onSelectTab={handleSelectTab} 
+            onToggleSidebar={() => setIsSidebarOpen(true)} 
+          />
           {activeTab === 'dashboard' ? (
             <Dashboard />
           ) : activeTab === 'employees' ? (
@@ -58,7 +103,7 @@ function App() {
           ) : activeTab === 'admin-management' ? (
             <AdminManagement />
           ) : (
-            <div className="pt-28 px-8 flex flex-col items-center justify-center min-h-[60vh] text-center">
+            <div className="pt-28 px-4 sm:px-8 flex flex-col items-center justify-center min-h-[60vh] text-center">
               <div className="w-16 h-16 rounded-3xl bg-red-50 text-red-500 flex items-center justify-center mb-4">
                 <span className="material-symbols-outlined text-[32px]">construction</span>
               </div>
@@ -67,7 +112,7 @@ function App() {
                 This module is currently being configured for Enterprise v2.4.
               </p>
               <button
-                onClick={() => setActiveTab('dashboard')}
+                onClick={() => handleSelectTab('dashboard')}
                 className="mt-5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white text-xs font-bold transition-all cursor-pointer"
               >
                 Back to Dashboard

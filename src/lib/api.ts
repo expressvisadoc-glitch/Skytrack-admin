@@ -3,11 +3,20 @@
  * Connects to the existing SkyTrack Supabase backend.
  */
 
-const SKYTRACK_API_URL = import.meta.env.VITE_SKYTRACK_API_URL || ''
+const SUPABASE_BASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || 'https://cwtrrtbodqctntkpnjlv.supabase.co'
 
-const SUPABASE_REST_URL = import.meta.env.VITE_SUPABASE_REST_URL || ''
+const SKYTRACK_API_URL =
+  import.meta.env.VITE_SKYTRACK_API_URL ||
+  (import.meta.env.DEV ? '/api/skytrack' : `${SUPABASE_BASE_URL}/functions/v1/skytrack-api`)
 
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+const SUPABASE_REST_URL =
+  import.meta.env.VITE_SUPABASE_REST_URL ||
+  `${SUPABASE_BASE_URL}/rest/v1`
+
+const SUPABASE_ANON_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  'sb_publishable_hvKs5JBFtNafLUmmsD0WHw_6mWC6oEc'
 
 export interface SkyTrackEmployee {
   id?: string
@@ -1309,8 +1318,7 @@ export async function getAdminProfile(
   token: string,
   employeeIdOrDbId?: string
 ): Promise<SkyTrackEmployee | null> {
-  const supabaseUrl =
-    import.meta.env.VITE_SUPABASE_URL || 'https://cwtrrtbodqctntkpnjlv.supabase.co'
+  const supabaseUrl = SUPABASE_BASE_URL
 
   let authUser: any = null
   let tokenEmail: string | null = null
@@ -1412,8 +1420,7 @@ export async function updateAdminPassword(
   token: string,
   newPassword: string
 ): Promise<void> {
-  const supabaseUrl =
-    import.meta.env.VITE_SUPABASE_URL || 'https://cwtrrtbodqctntkpnjlv.supabase.co'
+  const supabaseUrl = SUPABASE_BASE_URL
   const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
     method: 'PUT',
     headers: {
@@ -1530,6 +1537,18 @@ export async function updateEmployeeRole(
     action: 'update_employee_role',
     employeeId,
     role,
+  })
+}
+
+export async function updateEmployeeId(
+  token: string,
+  targetId: string,
+  newEmployeeId: string
+): Promise<{ success: boolean; message: string; employee?: any }> {
+  return fetchSkyTrackApi(token, {
+    action: 'update_employee_id',
+    targetId,
+    newEmployeeId,
   })
 }
 
@@ -1828,5 +1847,17 @@ export async function getAttendancePunchFeed(
     console.error('Failed to query attendance feed via REST fallback:', err)
     return []
   }
+}
+
+export async function fetchPublicHolidaysApi(token: string): Promise<{ success: boolean; holidays: any[] }> {
+  return fetchSkyTrackApi(token, {
+    action: 'public_holidays',
+  })
+}
+
+export async function seedPublicHolidays(token: string): Promise<{ success: boolean; message: string; holidays?: any[] }> {
+  return fetchSkyTrackApi(token, {
+    action: 'seed_public_holidays',
+  })
 }
 

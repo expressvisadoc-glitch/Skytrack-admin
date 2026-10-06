@@ -1,20 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
-import { useAuth } from '../contexts/AuthContext'
+import { useState, useEffect } from 'react'
 import { NotificationPanel } from './NotificationPanel'
-import { searchGlobal } from '../lib/api'
 
-export function Header({ onSelectTab }: { onSelectTab?: (tab: string) => void }) {
-  const { session } = useAuth()
+export function Header({ onSelectTab, onToggleSidebar }: { onSelectTab?: (tab: string) => void, onToggleSidebar?: () => void }) {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
   const [actionableCount, setActionableCount] = useState<number>(0)
   const [currentDate, setCurrentDate] = useState(new Date())
-
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<any[]>([])
-  const [isSearching, setIsSearching] = useState(false)
-  const [showResults, setShowResults] = useState(false)
-  const searchRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -22,39 +12,6 @@ export function Header({ onSelectTab }: { onSelectTab?: (tab: string) => void })
     }, 60000)
     return () => clearInterval(timer)
   }, [])
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
-        setShowResults(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  useEffect(() => {
-    if (!searchQuery.trim() || !session?.token) {
-      setSearchResults([])
-      return
-    }
-
-    const delay = setTimeout(async () => {
-      setIsSearching(true)
-      try {
-        const data = await searchGlobal(session.token, searchQuery)
-        if (data.success) {
-          setSearchResults(data.results || [])
-        }
-      } catch (err) {
-        console.error('Search error:', err)
-      } finally {
-        setIsSearching(false)
-      }
-    }, 400)
-
-    return () => clearTimeout(delay)
-  }, [searchQuery, session?.token])
 
   const formattedDate = currentDate.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -64,66 +21,19 @@ export function Header({ onSelectTab }: { onSelectTab?: (tab: string) => void })
   })
 
   return (
-    <header className="fixed top-0 left-72 right-0 h-20 bg-white/75 backdrop-blur-xl border-b border-slate-200/70 z-40 flex items-center justify-between px-8 transition-all">
-      {/* Brand / Search Bar */}
-      <div className="flex items-center gap-6 w-full max-w-xl">
+    <header className="fixed top-0 lg:left-72 left-0 right-0 h-20 bg-white/75 backdrop-blur-xl border-b border-slate-200/70 z-40 flex items-center justify-between px-4 lg:px-8 transition-all">
+      {/* Brand */}
+      <div className="flex items-center gap-4 lg:gap-6 w-full max-w-xl">
+        {onToggleSidebar && (
+          <button 
+            onClick={onToggleSidebar}
+            className="lg:hidden p-2 -ml-2 text-slate-500 hover:text-slate-800 rounded-xl hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[24px]">menu</span>
+          </button>
+        )}
         <div className="flex items-center gap-2.5 shrink-0">
-          <span className="font-bold text-base text-slate-900 tracking-tight">SkyTrack Admin</span>
-        </div>
-        <div ref={searchRef} className="relative w-full">
-          <div className="flex items-center gap-3 px-4 py-2 bg-slate-100/80 hover:bg-slate-100 rounded-2xl w-full border border-slate-200/50 transition-all focus-within:ring-2 focus-within:ring-red-500/20 focus-within:border-red-500/40">
-            <span className="material-symbols-outlined text-slate-400 text-[20px]">search</span>
-            <input
-              className="bg-transparent w-full focus:outline-none text-sm text-slate-700 placeholder:text-slate-400 font-medium"
-              placeholder="Search staff, attendance, records..."
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value)
-                setShowResults(true)
-              }}
-              onFocus={() => setShowResults(true)}
-            />
-            {isSearching ? (
-              <span className="w-4 h-4 rounded-full border-2 border-red-500/30 border-t-red-500 animate-spin"></span>
-            ) : (
-              <kbd className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-semibold text-slate-400 bg-white rounded-md border border-slate-200 shadow-2xs">
-                ⌘K
-              </kbd>
-            )}
-          </div>
-
-          {/* Search Results Dropdown */}
-          {showResults && searchQuery.trim().length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl border border-slate-200/70 shadow-xl overflow-hidden z-50 max-h-96 overflow-y-auto">
-              <div className="p-2">
-                <div className="px-3 py-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  Staff
-                </div>
-                {isSearching && searchResults.length === 0 ? (
-                  <div className="px-3 py-4 text-sm text-slate-500 text-center">Searching...</div>
-                ) : searchResults.length === 0 ? (
-                  <div className="px-3 py-4 text-sm text-slate-500 text-center">No results found for "{searchQuery}"</div>
-                ) : (
-                  searchResults.map((result) => (
-                    <div key={result.id} className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded-xl cursor-pointer transition-colors">
-                      {result.profile_photo_url ? (
-                        <img src={result.profile_photo_url} alt={result.name} className="w-10 h-10 rounded-full object-cover bg-slate-100 shrink-0" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-sm shrink-0">
-                          {result.name ? result.name.charAt(0).toUpperCase() : '?'}
-                        </div>
-                      )}
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-sm font-bold text-slate-800 truncate">{result.name}</span>
-                        <span className="text-xs text-slate-500 truncate">{result.employee_id} • {result.designation || result.department || result.role}</span>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
+          <span className="font-bold text-base text-slate-900 tracking-tight hidden sm:block lg:block">SkyTrack Admin</span>
         </div>
       </div>
 

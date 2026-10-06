@@ -11,6 +11,7 @@ import {
   type SkyTrackEmployeeLeaveBalance,
   getOrganizationData,
   updateEmployeeOrganization,
+  updateEmployeeId,
   type OrganizationData,
 } from '../lib/api'
 
@@ -35,6 +36,7 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editFormData, setEditFormData] = useState({
     name: initialEmployee?.name || '',
+    employeeId: initialEmployee?.employee_id || '',
     role: initialEmployee?.role || '',
     department: initialEmployee?.department || '',
     email: initialEmployee?.email || '',
@@ -65,6 +67,7 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
       setCurrentEmp(initialEmployee)
       setEditFormData({
         name: initialEmployee.name || '',
+        employeeId: initialEmployee.employee_id || '',
         role: initialEmployee.role || '',
         department: initialEmployee.department || '',
         email: initialEmployee.email || '',
@@ -144,9 +147,15 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
         editFormData.workShiftId || null
       )
 
+      const newEmployeeId = editFormData.employeeId.trim()
+      if (newEmployeeId && newEmployeeId !== currentEmp.employee_id) {
+        await updateEmployeeId(token, currentEmp.id, newEmployeeId)
+      }
+
       const updatedEmp: EmployeeDirectoryItem = {
         ...currentEmp,
         name: editFormData.name.trim(),
+        employee_id: editFormData.employeeId.trim(),
         role: editFormData.role.trim(),
         department: editFormData.department.trim(),
         email: editFormData.email.trim(),
@@ -236,7 +245,7 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
   })
 
   return (
-    <main className="w-full px-8 bg-background pt-24 pb-16 min-h-[calc(100vh-4rem)]">
+    <main className="w-full px-4 sm:px-8 bg-background pt-24 pb-16 min-h-[calc(100vh-4rem)]">
       <div className="flex flex-col w-full max-w-7xl mx-auto gap-6">
         {/* Top Back Navigation & Live Record Synced Status */}
         <div className="flex items-center justify-between">
@@ -480,16 +489,18 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                     />
                   </div>
 
-                  {/* Employee ID (Display Only / Badge) */}
+                  {/* Employee ID */}
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                      Employee ID
+                      Employee ID *
                     </label>
                     <input
                       type="text"
-                      disabled
-                      value={empCode}
-                      className="w-full h-11 px-3.5 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-500 font-mono font-semibold cursor-not-allowed"
+                      required
+                      value={editFormData.employeeId}
+                      onChange={(e) => setEditFormData({ ...editFormData, employeeId: e.target.value })}
+                      placeholder="e.g. SKY001"
+                      className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium font-mono"
                     />
                   </div>
 

@@ -71,7 +71,7 @@ export function AdminManagement() {
   // Only allow super admin to view this screen
   if (employee?.role !== 'super_admin') {
     return (
-      <main className="w-full pt-20 px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
+      <main className="w-full pt-20 px-4 sm:px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
         <div className="flex flex-col items-center justify-center pt-20">
            <h1 className="text-2xl font-bold text-red-600">Access Denied</h1>
            <p className="text-slate-500 mt-2">Only Super Admins can access this section.</p>
@@ -81,7 +81,7 @@ export function AdminManagement() {
   }
 
   return (
-    <main className="w-full pt-20 px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
+    <main className="w-full pt-20 px-4 sm:px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
       <div className="flex flex-col w-full max-w-7xl mx-auto gap-6">
         <div className="flex flex-col pt-4 gap-1.5">
           <div className="flex items-center gap-2">

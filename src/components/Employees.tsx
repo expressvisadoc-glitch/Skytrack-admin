@@ -172,7 +172,7 @@ export function Employees() {
 
 
   return (
-    <main className="w-full pt-20 px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
+    <main className="w-full pt-20 px-4 sm:px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
       <div className="flex flex-col w-full max-w-7xl mx-auto gap-6">
         {/* Top Header / Title Row */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pt-4">

@@ -1,5 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
+import { seedPublicHolidays, fetchPublicHolidaysApi } from '../lib/api'
 
 export interface PublicHolidayItem {
   id: string
@@ -22,9 +24,53 @@ export interface PublicHolidayItem {
   sourceType?: 'official' | 'company'
 }
 
+const MANDATORY_INDIAN_KERALA_HOLIDAYS = [
+  // 2026 Mandatory Indian & Kerala Public Holidays
+  { code: 'HOL-IN-2026-001', name: 'Republic Day', date: '2026-01-26', type: 'gazetted' as const, notes: 'Mandatory central statutory closure across operations (Republic Day)' },
+  { code: 'HOL-IN-2026-002', name: 'Maha Shivratri', date: '2026-02-15', type: 'gazetted' as const, notes: 'Gazetted holiday for Maha Shivratri' },
+  { code: 'HOL-IN-2026-003', name: 'Id-ul-Fitr (Ramzan)', date: '2026-03-20', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Id-ul-Fitr)' },
+  { code: 'HOL-IN-2026-004', name: 'Good Friday', date: '2026-04-03', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Good Friday)' },
+  { code: 'HOL-IN-2026-005', name: 'Dr. B.R. Ambedkar Jayanti / Vishu', date: '2026-04-14', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Vishu / Ambedkar Jayanti)' },
+  { code: 'HOL-IN-2026-006', name: 'May Day (International Workers\' Day)', date: '2026-05-01', type: 'gazetted' as const, notes: 'Mandatory statutory closure across Kerala and operations (May Day)' },
+  { code: 'HOL-IN-2026-007', name: 'Bakrid (Id-ul-Zuha)', date: '2026-05-27', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Bakrid)' },
+  { code: 'HOL-IN-2026-008', name: 'Muharram', date: '2026-06-26', type: 'gazetted' as const, notes: 'Gazetted holiday for Muharram' },
+  { code: 'HOL-IN-2026-009', name: 'Independence Day', date: '2026-08-15', type: 'gazetted' as const, notes: 'Mandatory central statutory closure across operations (Independence Day)' },
+  { code: 'HOL-IN-2026-010', name: 'First Onam', date: '2026-08-25', type: 'gazetted' as const, notes: 'Kerala State festival holiday (First Onam)' },
+  { code: 'HOL-IN-2026-011', name: 'Thiruvonam', date: '2026-08-26', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Thiruvonam)' },
+  { code: 'HOL-IN-2026-012', name: 'Third Onam / Milad-un-Nabi', date: '2026-08-27', type: 'gazetted' as const, notes: 'Kerala State festival / Gazetted holiday (Third Onam / Prophet\'s Birthday)' },
+  { code: 'HOL-IN-2026-013', name: 'Fourth Onam / Sree Narayana Guru Jayanti', date: '2026-08-28', type: 'gazetted' as const, notes: 'Kerala State festival holiday (Sree Narayana Guru Jayanti)' },
+  { code: 'HOL-IN-2026-014', name: 'Sree Narayana Guru Samadhi', date: '2026-09-21', type: 'gazetted' as const, notes: 'Kerala State holiday (Sree Narayana Guru Samadhi)' },
+  { code: 'HOL-IN-2026-015', name: 'Mahatma Gandhi Jayanti', date: '2026-10-02', type: 'gazetted' as const, notes: 'Mandatory central statutory closure across operations (Gandhi Jayanti)' },
+  { code: 'HOL-IN-2026-016', name: 'Mahanavami (Ayudha Pooja)', date: '2026-10-19', type: 'gazetted' as const, notes: 'Kerala State / Gazetted holiday for Mahanavami' },
+  { code: 'HOL-IN-2026-017', name: 'Vijayadashami (Dussehra)', date: '2026-10-20', type: 'gazetted' as const, notes: 'Kerala State / Gazetted holiday for Vijayadashami' },
+  { code: 'HOL-IN-2026-018', name: 'Deepavali (Diwali)', date: '2026-11-08', type: 'gazetted' as const, notes: 'Gazetted festival holiday for Deepavali' },
+  { code: 'HOL-IN-2026-019', name: 'Christmas', date: '2026-12-25', type: 'gazetted' as const, notes: 'Mandatory statutory closure across operations (Christmas)' },
+
+  // 2027 Upcoming Mandatory Indian & Kerala Public Holidays
+  { code: 'HOL-IN-2027-001', name: 'New Year\'s Day', date: '2027-01-01', type: 'restricted' as const, notes: 'Optional roster choice for regional hubs (New Year\'s Day)' },
+  { code: 'HOL-IN-2027-002', name: 'Republic Day', date: '2027-01-26', type: 'gazetted' as const, notes: 'Mandatory central statutory closure across operations (Republic Day)' },
+  { code: 'HOL-IN-2027-003', name: 'Maha Shivratri', date: '2027-03-06', type: 'gazetted' as const, notes: 'Gazetted holiday for Maha Shivratri' },
+  { code: 'HOL-IN-2027-004', name: 'Id-ul-Fitr (Ramzan)', date: '2027-03-10', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Id-ul-Fitr)' },
+  { code: 'HOL-IN-2027-005', name: 'Good Friday', date: '2027-03-26', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Good Friday)' },
+  { code: 'HOL-IN-2027-006', name: 'Dr. B.R. Ambedkar Jayanti / Vishu', date: '2027-04-14', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Vishu / Ambedkar Jayanti)' },
+  { code: 'HOL-IN-2027-007', name: 'May Day (International Workers\' Day)', date: '2027-05-01', type: 'gazetted' as const, notes: 'Mandatory statutory closure across Kerala and operations (May Day)' },
+  { code: 'HOL-IN-2027-008', name: 'Bakrid (Id-ul-Zuha)', date: '2027-05-16', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Bakrid)' },
+  { code: 'HOL-IN-2027-009', name: 'Muharram', date: '2027-07-16', type: 'gazetted' as const, notes: 'Gazetted holiday for Muharram' },
+  { code: 'HOL-IN-2027-010', name: 'Independence Day', date: '2027-08-15', type: 'gazetted' as const, notes: 'Mandatory central statutory closure across operations (Independence Day)' },
+  { code: 'HOL-IN-2027-011', name: 'Thiruvonam (Onam)', date: '2027-09-13', type: 'gazetted' as const, notes: 'Mandatory statutory closure in Kerala (Thiruvonam)' },
+  { code: 'HOL-IN-2027-012', name: 'Third Onam / Sree Narayana Guru Jayanti', date: '2027-09-14', type: 'gazetted' as const, notes: 'Kerala State festival holiday (Sree Narayana Guru Jayanti)' },
+  { code: 'HOL-IN-2027-013', name: 'Sree Narayana Guru Samadhi', date: '2027-09-21', type: 'gazetted' as const, notes: 'Kerala State holiday (Sree Narayana Guru Samadhi)' },
+  { code: 'HOL-IN-2027-014', name: 'Mahatma Gandhi Jayanti', date: '2027-10-02', type: 'gazetted' as const, notes: 'Mandatory central statutory closure across operations (Gandhi Jayanti)' },
+  { code: 'HOL-IN-2027-015', name: 'Mahanavami (Ayudha Pooja)', date: '2027-10-09', type: 'gazetted' as const, notes: 'Kerala State / Gazetted holiday for Mahanavami' },
+  { code: 'HOL-IN-2027-016', name: 'Vijayadashami (Dussehra)', date: '2027-10-10', type: 'gazetted' as const, notes: 'Kerala State / Gazetted holiday for Vijayadashami' },
+  { code: 'HOL-IN-2027-017', name: 'Deepavali (Diwali)', date: '2027-10-29', type: 'gazetted' as const, notes: 'Gazetted festival holiday for Deepavali' },
+  { code: 'HOL-IN-2027-018', name: 'Christmas', date: '2027-12-25', type: 'gazetted' as const, notes: 'Mandatory statutory closure across operations (Christmas)' },
+]
+
 const INITIAL_HOLIDAYS: PublicHolidayItem[] = []
 
 export function PublicHolidays() {
+  const { session } = useAuth()
   const currentYear = new Date().getFullYear()
 
   const [holidays, setHolidays] = useState<PublicHolidayItem[]>([])
@@ -56,56 +102,6 @@ export function PublicHolidays() {
   const loadHolidays = async () => {
     setLoading(true)
     try {
-      // 1. Fetch official holidays
-      let officialData: any[] | null = null
-      let officialError: any = null
-
-      try {
-        const result = await supabase
-          .from('official_public_holidays')
-          .select('*')
-          .eq('source_year', currentYear)
-          .eq('jurisdiction', 'kerala')
-
-        officialData = result.data
-        officialError = result.error
-      } catch (e) {
-        officialError = e
-      }
-
-      if (officialError) {
-        // PGRST205 means table doesn't exist yet, handle gracefully
-        if (officialError.code === 'PGRST205') {
-          console.warn('official_public_holidays table not found. Falling back to static data.')
-          officialData = []
-        } else {
-          throw officialError
-        }
-      }
-
-      // Automatically sync if missing
-      if (!officialData || officialData.length === 0) {
-        console.log('No official holidays found for current year. Attempting to sync...')
-        try {
-          await supabase.functions.invoke('sync-official-holidays', {
-            body: { year: currentYear, jurisdiction: 'kerala' }
-          })
-
-          const retry = await supabase
-            .from('official_public_holidays')
-            .select('*')
-            .eq('source_year', currentYear)
-            .eq('jurisdiction', 'kerala')
-
-          if (!retry.error && retry.data) {
-            officialData = retry.data
-          }
-        } catch (syncError) {
-          console.error('Failed to automatically sync official holidays:', syncError)
-        }
-      }
-
-      // 2. Fetch company holidays
       const startDate = `${currentYear}-01-01`
       const endDate = `${currentYear}-12-31`
 
@@ -125,17 +121,118 @@ export function PublicHolidays() {
 
         companyData = result.data
         companyError = result.error
+
+        // Fallback 1: If current year filter has 0 results, check for any holidays in DB
+        if (!companyData || companyData.length === 0) {
+          const allRes = await supabase
+            .from('public_holidays')
+            .select(`
+              *,
+              public_holiday_branches (branch_code)
+            `)
+            .order('holiday_date', { ascending: true })
+
+          if (allRes.data && allRes.data.length > 0) {
+            companyData = allRes.data
+          }
+        }
       } catch (e) {
         companyError = e
       }
 
-      if (companyError) {
-        if (companyError.code === 'PGRST205') {
-          console.warn('public_holidays table not found. Falling back to static data.')
-          companyData = []
-        } else {
-          throw companyError
+      // Fallback 2: If join failed or returned empty, try plain select on public_holidays
+      if (!companyData || companyData.length === 0) {
+        try {
+          const plainRes = await supabase
+            .from('public_holidays')
+            .select('*')
+            .order('holiday_date', { ascending: true })
+
+          if (plainRes.data && plainRes.data.length > 0) {
+            companyData = plainRes.data
+          }
+        } catch (_err) {}
+      }
+
+      if (companyError && companyError.code !== 'PGRST205' && (!companyData || companyData.length === 0)) {
+        console.warn('Company holiday query warning:', companyError)
+      }
+
+      // If database is empty, automatically populate mandatory holidays in the background
+      if (!companyData || companyData.length === 0) {
+        try {
+          if (session?.token) {
+            await seedPublicHolidays(session.token)
+          } else {
+            await fetchPublicHolidaysApi('')
+          }
+        } catch (_syncErr) {}
+
+        // Fallback: seed directly into public_holidays if still empty
+        try {
+          const check = await supabase
+            .from('public_holidays')
+            .select('id')
+            .limit(1)
+
+          if (!check.data || check.data.length === 0) {
+            for (const h of MANDATORY_INDIAN_KERALA_HOLIDAYS) {
+              const { data: ins } = await supabase
+                .from('public_holidays')
+                .insert({
+                  holiday_code: h.code,
+                  holiday_name: h.name,
+                  holiday_date: h.date,
+                  holiday_type: h.type,
+                  is_paid: true,
+                  status: 'published',
+                  notes: h.notes
+                })
+                .select()
+                .maybeSingle()
+
+              if (ins?.id) {
+                const branches = ['dl', 'mh', 'ka', 'kl', 'ts'].map(b => ({
+                  holiday_id: ins.id,
+                  branch_code: b
+                }))
+                await supabase.from('public_holiday_branches').insert(branches)
+              }
+            }
+          }
+        } catch (directErr) {
+          console.warn('Direct seeding fallback skipped:', directErr)
         }
+
+        const retry = await supabase
+          .from('public_holidays')
+          .select(`
+            *,
+            public_holiday_branches (branch_code)
+          `)
+          .gte('holiday_date', startDate)
+          .lte('holiday_date', endDate)
+          .order('holiday_date', { ascending: true })
+
+        if (retry.data && retry.data.length > 0) {
+          companyData = retry.data
+        }
+      }
+
+      // Optional check for official_public_holidays if table exists
+      let officialData: any[] | null = null
+      try {
+        const result = await supabase
+          .from('official_public_holidays')
+          .select('*')
+          .eq('source_year', currentYear)
+          .eq('jurisdiction', 'kerala')
+
+        if (!result.error && result.data) {
+          officialData = result.data
+        }
+      } catch (_e) {
+        // Table not created yet, ignored
       }
 
       // 3. Map official holidays
@@ -265,7 +362,7 @@ export function PublicHolidays() {
     const upcoming =
       holidays
         .filter((h) => h.date >= todayStr)
-        .sort((a, b) => a.date.localeCompare(b.date))[0] || holidays[17]
+        .sort((a, b) => a.date.localeCompare(b.date))[0] || holidays[0] || null
 
     let daysRemaining = 0
     if (upcoming) {
@@ -470,7 +567,7 @@ export function PublicHolidays() {
   }
 
   return (
-    <main className="relative w-full pt-28 px-8 pb-16 min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-16 min-h-screen">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-3 duration-300">
@@ -512,6 +609,7 @@ export function PublicHolidays() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
+
             <button
               onClick={handleExportSchedule}
               className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white/90 hover:bg-white text-slate-700 font-semibold text-xs border border-slate-200/80 shadow-sm transition-all cursor-pointer"
@@ -982,24 +1080,28 @@ export function PublicHolidays() {
                         className="px-6 py-12 text-center text-slate-400"
                       >
                         <div className="flex flex-col items-center gap-2">
-                          <span className="material-symbols-outlined text-4xl text-slate-300">
+                          <span className="material-symbols-outlined text-4xl text-brand-500">
                             event_busy
                           </span>
 
-                          <span className="text-sm font-semibold text-slate-600">
-                            No holidays found matching your filters.
+                          <span className="text-sm font-semibold text-slate-700">
+                            {holidays.length === 0
+                              ? 'No public holidays listed in database for this year.'
+                              : 'No holidays found matching your filters.'}
                           </span>
 
-                          <button
-                            onClick={() => {
-                              setSearchQuery('')
-                              setTypeFilter('')
-                              setActiveTab('all')
-                            }}
-                            className="mt-1 text-xs text-brand-600 font-bold hover:underline cursor-pointer"
-                          >
-                            Reset filters
-                          </button>
+                          {holidays.length > 0 && (
+                            <button
+                              onClick={() => {
+                                setSearchQuery('')
+                                setTypeFilter('')
+                                setActiveTab('all')
+                              }}
+                              className="mt-1 text-xs text-brand-600 font-bold hover:underline cursor-pointer"
+                            >
+                              Reset filters
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

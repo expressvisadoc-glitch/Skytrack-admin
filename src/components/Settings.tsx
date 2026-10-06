@@ -152,7 +152,7 @@ export function Settings({ onLogout }: SettingsProps) {
 
   if (isLoggedOut) {
     return (
-      <main className="relative w-full pt-28 px-8 pb-14 min-h-screen flex items-center justify-center">
+      <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen flex items-center justify-center">
         <div className="bg-white rounded-3xl border border-slate-200 shadow-xl p-8 max-w-md text-center flex flex-col items-center gap-4">
           <div className="w-16 h-16 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center">
             <span className="material-symbols-outlined text-[32px]">lock</span>
@@ -176,7 +176,7 @@ export function Settings({ onLogout }: SettingsProps) {
   }
 
   return (
-    <main className="relative w-full pt-28 px-8 pb-14 bg-[#faf9fd] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#faf9fd] min-h-screen">
       {/* Logout Confirmation Modal */}
       {showLogoutModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">

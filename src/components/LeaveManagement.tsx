@@ -117,7 +117,7 @@ export function LeaveManagement() {
   }
 
   return (
-    <main className="relative w-full pt-28 px-8 pb-14 bg-[#f4f6fb] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#f4f6fb] min-h-screen">
       <div className="flex flex-col w-full gap-7 max-w-[1600px] mx-auto">
         {/* Top Operational Hero Card / Greeting Banner */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-3xl bg-white/90 backdrop-blur-xl border border-white/80 shadow-[0_10px_30px_rgba(0,0,0,0.02)]">
