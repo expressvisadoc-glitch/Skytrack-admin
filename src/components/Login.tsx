@@ -1,4 +1,15 @@
 import { useState } from 'react'
+import { 
+  IdCard, 
+  Lock, 
+  Eye, 
+  EyeOff, 
+  Calendar, 
+  LogIn, 
+  Loader2, 
+  CheckCircle2, 
+  AlertCircle 
+} from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 interface LoginProps {
@@ -75,7 +86,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
         <div className="flex items-center gap-3 sm:gap-4">
           {/* Operational Date Pill */}
           <div className="hidden md:flex items-center gap-2 text-slate-600 px-3.5 py-1.5 bg-slate-50/80 rounded-full border border-slate-200/70 shadow-xs">
-            <span className="material-symbols-outlined text-[17px] text-red-500">calendar_today</span>
+            <Calendar className="w-4 h-4 text-red-500" />
             <span className="text-xs font-semibold text-slate-700">Monday, Sep 21, 2026</span>
           </div>
 
@@ -87,7 +98,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
 
           {/* Connection / Security Status Pill */}
           <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-slate-200/80 shadow-xs text-xs font-semibold text-slate-600">
-            <span className="material-symbols-outlined text-[16px] text-slate-500">lock</span>
+            <Lock className="w-3.5 h-3.5 text-slate-500" />
             <span>256-bit TLS Encrypted</span>
           </div>
         </div>
@@ -135,9 +146,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
                   Employee ID or Work Email
                 </label>
                 <div className="relative flex items-center group">
-                  <span className="material-symbols-outlined absolute left-3.5 text-slate-400 text-[20px] pointer-events-none transition-colors group-focus-within:text-red-500">
-                    badge
-                  </span>
+                  <IdCard className="absolute left-3.5 text-slate-400 w-5 h-5 pointer-events-none transition-colors group-focus-within:text-red-500" />
                   <input
                     id="adminCredential"
                     value={credential}
@@ -169,9 +178,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
                   </button>
                 </div>
                 <div className="relative flex items-center group">
-                  <span className="material-symbols-outlined absolute left-3.5 text-slate-400 text-[20px] pointer-events-none transition-colors group-focus-within:text-red-500">
-                    lock
-                  </span>
+                  <Lock className="absolute left-3.5 text-slate-400 w-5 h-5 pointer-events-none transition-colors group-focus-within:text-red-500" />
                   <input
                     id="adminPassword"
                     value={password}
@@ -187,9 +194,11 @@ export function Login({ onLoginSuccess }: LoginProps) {
                     className="absolute right-3 p-1 text-slate-400 hover:text-slate-700 transition-colors flex items-center justify-center rounded-lg cursor-pointer"
                     title="Toggle password visibility"
                   >
-                    <span className="material-symbols-outlined text-[20px]">
-                      {showPassword ? 'visibility_off' : 'visibility'}
-                    </span>
+                    {showPassword ? (
+                      <EyeOff className="w-5 h-5" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
                   </button>
                 </div>
               </div>
@@ -210,7 +219,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
 
               {errorMessage && (
                 <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[17px]">error</span>
+                  <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>{errorMessage}</span>
                 </div>
               )}
@@ -228,13 +237,13 @@ export function Login({ onLoginSuccess }: LoginProps) {
                   }`}
                   type="submit"
                 >
-                  <span className="material-symbols-outlined text-[20px]">
-                    {statusState === 'verifying'
-                      ? 'sync'
-                      : statusState === 'approved'
-                      ? 'check_circle'
-                      : 'login'}
-                  </span>
+                  {statusState === 'verifying' ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : statusState === 'approved' ? (
+                    <CheckCircle2 className="w-5 h-5" />
+                  ) : (
+                    <LogIn className="w-5 h-5" />
+                  )}
                   <span>
                     {statusState === 'idle'
                       ? 'Sign In to Admin Portal'
@@ -245,6 +254,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
                 </button>
               </div>
             </form>
+
           </div>
 
           {/* Supplementary Micro Notice below Card */}
