@@ -19,10 +19,108 @@ const authClient = createClient(
 );
 
 // =============================================================
+// CORS CONFIGURATION & HELPERS
+// =============================================================
+
+function isAllowedOrigin(origin: string): boolean {
+  if (!origin) return false;
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
+
+    // 1. Localhost development
+    if (host === "localhost" || host === "127.0.0.1") {
+      return true;
+    }
+
+    // 2. Cloudflare Pages & Workers (*.pages.dev, *.workers.dev)
+    if (host.endsWith(".pages.dev") || host.endsWith(".workers.dev")) {
+      return true;
+    }
+
+    // 3. Organization domains & subdomains
+    if (
+      host.includes("skytrack") ||
+      host.includes("skypass") ||
+      host.includes("expressvisa")
+    ) {
+      return true;
+    }
+
+    // 4. Custom origins via environment variable
+    const envAllowed = Deno.env.get("ALLOWED_ORIGINS");
+    if (envAllowed) {
+      const list = envAllowed.split(",").map((s) => s.trim().toLowerCase());
+      if (list.includes(origin.toLowerCase()) || list.includes(host)) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function getCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin") || req.headers.get("Origin") || "";
+  const allowed = isAllowedOrigin(origin);
+  const originHeader = allowed ? origin : (origin || "http://localhost:5173");
+
+  return {
+    "Access-Control-Allow-Origin": originHeader,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info, accept",
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin",
+  };
+}
+
+// =============================================================
 // MAIN SERVER
 // =============================================================
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
+
+  // 1. Handle CORS preflight before method validation or request body parsing
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: corsHeaders,
+    });
+  }
+
+  // 2. Delegate to request handler
+  try {
+    const response = await handleRequest(req);
+
+    // 3. Ensure CORS headers are attached to all normal and error responses
+    for (const [key, value] of Object.entries(corsHeaders)) {
+      response.headers.set(key, value);
+    }
+
+    return response;
+  } catch (err) {
+    console.error("Unhandled Edge Function error:", err);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: "server_error",
+        message: err instanceof Error ? err.message : "Internal server error"
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+  }
+});
+
+async function handleRequest(req: Request): Promise<Response> {
   try {
     if (req.method !== "POST") {
       return json(
@@ -289,7 +387,7 @@ Deno.serve(async (req) => {
       500
     );
   }
-});
+}
 
 // =============================================================
 // LOGIN

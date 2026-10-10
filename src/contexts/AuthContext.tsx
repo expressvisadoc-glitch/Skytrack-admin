@@ -163,7 +163,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       console.error('SkyTrack Login Error:', err)
       const message =
         err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
-          ? 'Unable to connect to SkyTrack authentication servers. Please verify your network connection.'
+          ? 'Unable to connect to SkyTrack authentication servers. Please verify your network connection or try signing in with your administrator email.'
           : err?.message || 'An unexpected error occurred during authentication.'
 
       return {

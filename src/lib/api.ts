@@ -3,12 +3,13 @@
  * Connects to the existing SkyTrack Supabase backend.
  */
 
+import { supabase } from './supabase'
+
 const SUPABASE_BASE_URL =
   import.meta.env.VITE_SUPABASE_URL || 'https://cwtrrtbodqctntkpnjlv.supabase.co'
 
 const SKYTRACK_API_URL =
-  import.meta.env.VITE_SKYTRACK_API_URL ||
-  (import.meta.env.DEV ? '/api/skytrack' : `${SUPABASE_BASE_URL}/functions/v1/skytrack-api`)
+  import.meta.env.VITE_SKYTRACK_API_URL || '/api/skytrack'
 
 const SUPABASE_REST_URL =
   import.meta.env.VITE_SUPABASE_REST_URL ||
@@ -182,36 +183,91 @@ export async function loginWithSkyTrack(
   employeeId: string,
   password: string
 ): Promise<SkyTrackLoginResponse> {
-  const payload = {
-    action: 'login',
-    employeeId: employeeId.trim(),
-    password,
-  }
+  const cleanId = employeeId.trim()
 
-  const response = await fetch(SKYTRACK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  })
+  // 1. Direct Supabase Auth attempt if input is an email address
+  if (cleanId.includes('@')) {
+    try {
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: cleanId,
+        password,
+      })
 
-  let data: any
-  try {
-    data = await response.json()
-  } catch (err) {
-    throw new Error('Invalid JSON response from SkyTrack authentication server.')
-  }
-
-  if (!response.ok && data) {
-    return { 
-      success: false, 
-      error: data.code || data.error || 'http_error', 
-      message: data.message || data.msg || 'Authentication failed.' 
+      if (!authError && authData.session && authData.user) {
+        const token = authData.session.access_token
+        const profile = await getAdminProfile(token, authData.user.id)
+        if (profile) {
+          return {
+            success: true,
+            session: {
+              token,
+              accessToken: token,
+              expiresInSeconds: authData.session.expires_in,
+            },
+            employee: profile,
+          }
+        }
+      }
+    } catch (directAuthErr) {
+      console.warn('Direct Supabase email login fallback error:', directAuthErr)
     }
   }
 
-  return data as SkyTrackLoginResponse
+  // 2. Query SkyTrack Edge Function with automated failover
+  const payload = {
+    action: 'login',
+    employeeId: cleanId,
+    password,
+  }
+
+  const directEdgeUrl = `${SUPABASE_BASE_URL}/functions/v1/skytrack-api`
+  const endpointsToTry = [
+    SKYTRACK_API_URL,
+    SKYTRACK_API_URL !== directEdgeUrl ? directEdgeUrl : '/api/skytrack',
+  ].filter(Boolean)
+
+  let lastError: any = null
+
+  for (const url of endpointsToTry) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify(payload),
+      })
+
+      let data: any
+      try {
+        data = await response.json()
+      } catch (err) {
+        // Non-JSON response (e.g. static server returning index.html for 404) -> try next endpoint
+        continue
+      }
+
+      if (!response.ok && data) {
+        return {
+          success: false,
+          error: data.code || data.error || 'http_error',
+          message: data.message || data.msg || 'Authentication failed.',
+        }
+      }
+
+      return data as SkyTrackLoginResponse
+    } catch (err: any) {
+      lastError = err
+      // Try next endpoint in list
+    }
+  }
+
+  if (lastError) {
+    throw lastError
+  }
+
+  throw new Error('Unable to connect to SkyTrack authentication servers.')
 }
 
 /**
@@ -1588,27 +1644,46 @@ export interface SkyTrackEmployeeLeaveBalance {
 }
 
 async function fetchSkyTrackApi<T = any>(token: string, payload: any): Promise<T> {
-  const response = await fetch(SKYTRACK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(payload),
-  })
-
-  let data: any
-  try {
-    data = await response.json()
-  } catch (err) {
-    throw new Error('Invalid JSON response from SkyTrack API.')
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${token}`,
   }
 
-  if (!response.ok || data.success === false) {
-    throw new Error(data?.error || data?.message || 'SkyTrack API request failed.')
+  const directEdgeUrl = `${SUPABASE_BASE_URL}/functions/v1/skytrack-api`
+  const endpointsToTry = [
+    SKYTRACK_API_URL,
+    SKYTRACK_API_URL !== directEdgeUrl ? directEdgeUrl : '/api/skytrack',
+  ].filter(Boolean)
+
+  let lastError: any = null
+
+  for (const url of endpointsToTry) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      })
+
+      let data: any
+      try {
+        data = await response.json()
+      } catch (err) {
+        continue
+      }
+
+      if (!response.ok || data.success === false) {
+        throw new Error(data?.error || data?.message || 'SkyTrack API request failed.')
+      }
+
+      return data as T
+    } catch (err: any) {
+      lastError = err
+    }
   }
 
-  return data as T
+  throw lastError || new Error('SkyTrack API request failed.')
 }
 
 export async function submitLeave(

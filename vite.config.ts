@@ -17,4 +17,13 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    proxy: {
+      '/api/skytrack': {
+        target: 'https://cwtrrtbodqctntkpnjlv.supabase.co/functions/v1/skytrack-api',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/skytrack/, ''),
+      },
+    },
+  },
 })

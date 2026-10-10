@@ -168,7 +168,6 @@ Whenever modifications, additions, or refactors are made to the codebase:
   - Implemented dynamic UI safeguards in `PublicHolidays.tsx`: editing and deletion functions are disabled for official government holidays, maintaining data integrity.
   - Updated all temporal references in `PublicHolidays.tsx` to dynamically reference the current calendar year (`new Date().getFullYear()`) ensuring the module remains functional across calendar years without hardcoded updates.
 
-
 ### [2026-09-26] — Public Holidays Layout & Form Streamlining
 - **Author**: Antigravity Assistant & User
 - **Scope**: Screen Refinement & Simplification
@@ -213,4 +212,6 @@ Whenever modifications, additions, or refactors are made to the codebase:
 
 ### Edge Function Notes
 - The Supabase Edge function `skytrack-api` handles attendance formatting. The `hours` field in the API response is formatted as `Xh YYm` (e.g. `8h 30m`), which differs from `HH:MM`. Android clients must parse this correctly.
+- Active working hours are calculated as `Total Presence Time - Total Break Time`, stored as integer `worked_minutes` and `break_minutes`.
+this correctly.
 - Active working hours are calculated as `Total Presence Time - Total Break Time`, stored as integer `worked_minutes` and `break_minutes`.
