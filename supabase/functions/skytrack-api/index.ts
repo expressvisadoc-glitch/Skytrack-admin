@@ -134,13 +134,13 @@ async function handleRequest(req: Request): Promise<Response> {
     }
 
     const body = await req.json();
-    const action = String(body.action ?? "").trim();
+    const action = String(body.action ?? body.a ?? "").trim().toLowerCase();
 
     // =========================================================
     // LOGIN & PUBLIC ACCESS
     // =========================================================
 
-    if (action === "login") {
+    if (action === "login" || (!action && (body.employeeId || body.employee_id || body.b) && (body.password || body.c))) {
       return await handleLogin(body);
     }
 
@@ -417,10 +417,10 @@ async function handleRequest(req: Request): Promise<Response> {
 
 async function handleLogin(body: any) {
   const employeeId =
-    String(body.employeeId ?? "").trim();
+    String(body.employeeId ?? body.employee_id ?? body.b ?? "").trim();
 
   const password =
-    String(body.password ?? "");
+    String(body.password ?? body.c ?? "");
 
   if (!employeeId || !password) {
     return json(
