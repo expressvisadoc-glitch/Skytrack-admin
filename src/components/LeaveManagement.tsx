@@ -4,6 +4,7 @@ import {
   getLeaveSubmissions,
   approveLeave,
   rejectLeave,
+  cancelLeave,
   type LeaveSubmissionRecord,
 } from '../lib/api'
 
@@ -111,6 +112,36 @@ export function LeaveManagement() {
     } catch (err: any) {
       console.error('Error rejecting leave:', err)
       alert(err.message || 'Failed to reject leave request.')
+    } finally {
+      setIsUpdating(null)
+    }
+  }
+
+  const handleCancel = async (leaveOrId: LeaveSubmissionRecord | string) => {
+    if (!token) return
+    const leave =
+      typeof leaveOrId === 'string'
+        ? submissions.find((s) => s.id === leaveOrId || s.request_id === leaveOrId || s.requestId === leaveOrId)
+        : leaveOrId
+    const requestId = leave?.request_id || leave?.requestId || (typeof leaveOrId === 'string' ? leaveOrId : leave?.id)
+    const updateKey = leave?.id || (typeof leaveOrId === 'string' ? leaveOrId : '')
+    if (!requestId) return
+
+    const confirmMsg = leave?.status === 'Approved'
+      ? `Are you sure you want to cancel the approved leave for ${leave?.employeeName || 'this employee'}? Any deducted leave balance will be restored.`
+      : `Are you sure you want to cancel the leave request for ${leave?.employeeName || 'this employee'}?`
+
+    if (!window.confirm(confirmMsg)) {
+      return
+    }
+
+    setIsUpdating(updateKey)
+    try {
+      await cancelLeave(token, requestId, 'Cancelled by Administrator')
+      await loadSubmissions()
+    } catch (err: any) {
+      console.error('Error cancelling leave:', err)
+      alert(err.message || 'Failed to cancel leave request.')
     } finally {
       setIsUpdating(null)
     }
@@ -464,6 +495,23 @@ export function LeaveManagement() {
                                     </button>
                                   </>
                                 )}
+                                {row.status === 'Approved' && (
+                                  <button
+                                    disabled={isThisUpdating}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleCancel(row)
+                                    }}
+                                    className="p-1.5 rounded-xl bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1 text-[11px] font-semibold px-2"
+                                    title="Cancel Approved Leave"
+                                    type="button"
+                                  >
+                                    <span className="material-symbols-outlined text-[15px]">
+                                      {isThisUpdating ? 'hourglass_top' : 'block'}
+                                    </span>
+                                    <span className="hidden sm:inline">Cancel</span>
+                                  </button>
+                                )}
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation()
@@ -686,6 +734,23 @@ export function LeaveManagement() {
                       <span className="material-symbols-outlined text-[18px]">cancel</span>
                       <span>Reject</span>
                     </button>
+                  </div>
+                ) : selectedItem.status === 'Approved' ? (
+                  <div className="pt-2 flex flex-col gap-2">
+                    <button
+                      disabled={isUpdating === selectedItem.id}
+                      onClick={() => handleCancel(selectedItem)}
+                      className="w-full h-11 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                      type="button"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">
+                        {isUpdating === selectedItem.id ? 'hourglass_top' : 'block'}
+                      </span>
+                      <span>{isUpdating === selectedItem.id ? 'Cancelling...' : 'Cancel Approved Leave'}</span>
+                    </button>
+                    <p className="text-[11px] text-center text-slate-400 font-medium">
+                      Cancelling this approved leave will restore any deducted leave days back to the employee's balance.
+                    </p>
                   </div>
                 ) : (
                   <div className="pt-2 text-center text-xs text-slate-400 font-medium">

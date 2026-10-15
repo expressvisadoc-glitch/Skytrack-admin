@@ -5,6 +5,7 @@ import {
   type FullAttendanceRecord,
 } from '../lib/api'
 import { generateAttendancePdf } from '../lib/attendancePdf'
+import { EmployeeAttendanceHistory } from './EmployeeAttendanceHistory'
 
 export function Attendance() {
   const { token, logout } = useAuth()
@@ -25,36 +26,68 @@ export function Attendance() {
   >('All')
   const [selectedId, setSelectedId] = useState<string>('')
   const [downloadToast, setDownloadToast] = useState(false)
+  const [selectedEmployeeForHistory, setSelectedEmployeeForHistory] = useState<FullAttendanceRecord | null>(null)
 
   const todayIsoDate = useMemo(() => new Date().toISOString().slice(0, 10), [])
-  const formattedToday = useMemo(
-    () =>
-      new Date().toLocaleDateString('en-GB', {
+  const [selectedDate, setSelectedDate] = useState<string>(todayIsoDate)
+
+  const formattedSelectedDate = useMemo(() => {
+    try {
+      const [y, m, d] = selectedDate.split('-').map(Number)
+      return new Date(y, m - 1, d).toLocaleDateString('en-GB', {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
-      }),
-    []
-  )
-  const currentMonthName = useMemo(
-    () =>
-      new Date().toLocaleDateString('en-GB', {
+      })
+    } catch {
+      return selectedDate
+    }
+  }, [selectedDate])
+
+  const currentMonthName = useMemo(() => {
+    try {
+      const [y, m, d] = selectedDate.split('-').map(Number)
+      return new Date(y, m - 1, d).toLocaleDateString('en-GB', {
         month: 'long',
         year: 'numeric',
-      }),
-    []
-  )
+      })
+    } catch {
+      return new Date().toLocaleDateString('en-GB', {
+        month: 'long',
+        year: 'numeric',
+      })
+    }
+  }, [selectedDate])
+
+  const isToday = selectedDate === todayIsoDate
+
+  const handlePreviousDay = () => {
+    const [y, m, d] = selectedDate.split('-').map(Number)
+    const prev = new Date(Date.UTC(y, m - 1, d - 1))
+    setSelectedDate(prev.toISOString().slice(0, 10))
+  }
+
+  const handleNextDay = () => {
+    if (selectedDate >= todayIsoDate) return
+    const [y, m, d] = selectedDate.split('-').map(Number)
+    const next = new Date(Date.UTC(y, m - 1, d + 1))
+    setSelectedDate(next.toISOString().slice(0, 10))
+  }
+
+  const handleResetToday = () => {
+    setSelectedDate(todayIsoDate)
+  }
 
   const loadAttendance = useCallback(async () => {
     if (!token) return
     setIsLoading(true)
     setError(null)
     try {
-      const data = await getDailyAttendance(token, todayIsoDate)
+      const data = await getDailyAttendance(token, selectedDate)
       setRecords(data.records)
       setCounts(data.counts)
-      if (data.records.length > 0 && !selectedId) {
-        setSelectedId(data.records[0].id)
+      if (data.records.length > 0) {
+        setSelectedId((prev) => prev && data.records.some(r => r.id === prev) ? prev : data.records[0].id)
       }
     } catch (err: any) {
       console.error('Failed to load daily attendance:', err)
@@ -66,11 +99,48 @@ export function Attendance() {
     } finally {
       setIsLoading(false)
     }
-  }, [token, todayIsoDate, selectedId, logout])
+  }, [token, selectedDate, logout])
 
   useEffect(() => {
     loadAttendance()
   }, [loadAttendance])
+
+  // Support direct deep linking via URL (?emp=SKY001)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const empParam = params.get('emp')
+    if (empParam && records.length > 0 && !selectedEmployeeForHistory) {
+      const found = records.find(
+        (r) => r.employeeId.toLowerCase() === empParam.toLowerCase() || r.employeeDbId === empParam
+      )
+      if (found) setSelectedEmployeeForHistory(found)
+    }
+  }, [records, selectedEmployeeForHistory])
+
+  // Support browser Back/Forward navigation
+  useEffect(() => {
+    const onPopState = () => {
+      const params = new URLSearchParams(window.location.search)
+      const empParam = params.get('emp')
+      if (!empParam) {
+        setSelectedEmployeeForHistory(null)
+      } else if (records.length > 0) {
+        const found = records.find(
+          (r) => r.employeeId.toLowerCase() === empParam.toLowerCase() || r.employeeDbId === empParam
+        )
+        if (found) setSelectedEmployeeForHistory(found)
+      }
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [records])
+
+  const handleOpenEmployeeHistory = (record: FullAttendanceRecord) => {
+    setSelectedEmployeeForHistory(record)
+    const url = new URL(window.location.href)
+    url.searchParams.set('emp', record.employeeId)
+    window.history.pushState(null, '', url.toString())
+  }
 
   const filteredRecords = useMemo(() => {
     return records.filter((item) => {
@@ -97,13 +167,13 @@ export function Attendance() {
     setDownloadToast(true)
 
     // Build and download PDF attendance sheet
-    const blob = await generateAttendancePdf(selectedRecord, formattedToday)
+    const blob = await generateAttendancePdf(selectedRecord, formattedSelectedDate)
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.setAttribute('href', url)
     link.setAttribute(
       'download',
-      `SkyTrack_Attendance_${selectedRecord.employeeId}_${todayIsoDate}.pdf`
+      `SkyTrack_Attendance_${selectedRecord.employeeId}_${selectedDate}.pdf`
     )
     document.body.appendChild(link)
     link.click()
@@ -111,6 +181,43 @@ export function Attendance() {
     URL.revokeObjectURL(url)
 
     setTimeout(() => setDownloadToast(false), 3000)
+  }
+
+  // If viewing employee monthly history page
+  if (selectedEmployeeForHistory) {
+    return (
+      <EmployeeAttendanceHistory
+        employeeId={selectedEmployeeForHistory.employeeId || selectedEmployeeForHistory.employeeDbId}
+        employeeName={selectedEmployeeForHistory.employeeName}
+        initialData={selectedEmployeeForHistory}
+        allEmployees={records.map((r) => ({
+          id: r.employeeDbId,
+          employeeId: r.employeeId,
+          name: r.employeeName,
+          role: r.role,
+          department: r.department,
+          avatar: r.avatar,
+          joiningDate: r.joiningDate || r.created_at,
+        }))}
+        onBack={() => {
+          setSelectedEmployeeForHistory(null)
+          const url = new URL(window.location.href)
+          url.searchParams.delete('emp')
+          window.history.pushState(null, '', url.pathname)
+        }}
+        onSelectEmployee={(empId) => {
+          const found = records.find(
+            (r) => r.employeeId === empId || r.employeeDbId === empId
+          )
+          if (found) {
+            setSelectedEmployeeForHistory(found)
+            const url = new URL(window.location.href)
+            url.searchParams.set('emp', found.employeeId)
+            window.history.pushState(null, '', url.toString())
+          }
+        }}
+      />
+    )
   }
 
   return (
@@ -217,21 +324,99 @@ export function Attendance() {
               />
             </div>
 
-            {/* Date & Month Controls */}
+            {/* Date & Month Controls with Interactive Date Selector */}
             <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-800 hover:bg-slate-100 transition-colors">
-                <span className="material-symbols-outlined text-[17px] text-red-600">
-                  calendar_today
-                </span>
-                <span className="text-xs font-semibold">
-                  {formattedToday} (Today)
-                </span>
+              <div className="flex items-center bg-slate-50 border border-slate-200/80 rounded-xl p-1 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={handlePreviousDay}
+                  title="Previous Day"
+                  className="w-7 h-7 rounded-lg hover:bg-white text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+                </button>
+
+                <div className="relative flex items-center gap-1.5 px-2">
+                  <span className="material-symbols-outlined text-[17px] text-red-600">
+                    calendar_today
+                  </span>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    max={todayIsoDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer"
+                  />
+                  {isToday ? (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                      Today
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                      Past
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleNextDay}
+                  disabled={selectedDate >= todayIsoDate}
+                  title="Next Day"
+                  className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                    selectedDate >= todayIsoDate
+                      ? 'text-slate-300 cursor-not-allowed'
+                      : 'hover:bg-white text-slate-500 hover:text-slate-800 cursor-pointer'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                </button>
               </div>
-              <div className="flex items-center bg-slate-50 border border-slate-200/80 rounded-xl px-1 py-1">
-                <span className="px-3 text-xs font-semibold text-slate-800">
+
+              {!isToday && (
+                <button
+                  type="button"
+                  onClick={handleResetToday}
+                  className="px-2.5 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs transition-colors cursor-pointer border border-red-200 flex items-center gap-1 shadow-2xs"
+                >
+                  <span className="material-symbols-outlined text-[14px]">today</span>
+                  <span>Jump to Today</span>
+                </button>
+              )}
+
+              <div className="flex items-center bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-1.5">
+                <span className="text-xs font-semibold text-slate-800">
                   {currentMonthName}
                 </span>
               </div>
+
+              {/* Quick Employee Monthly History Dropdown */}
+              {records.length > 0 && (
+                <div className="flex items-center bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1.5 hover:bg-slate-100 transition-colors">
+                  <span className="material-symbols-outlined text-[16px] text-red-600 mr-1.5">
+                    person_search
+                  </span>
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      const found = records.find(
+                        (r) => r.employeeId === e.target.value || r.employeeDbId === e.target.value
+                      )
+                      if (found) handleOpenEmployeeHistory(found)
+                    }}
+                    className="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer pr-1"
+                  >
+                    <option value="" disabled>
+                      View Monthly History...
+                    </option>
+                    {records.map((r) => (
+                      <option key={r.id} value={r.employeeId}>
+                        {r.employeeName} ({r.employeeId})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -372,8 +557,8 @@ export function Attendance() {
             <div className="px-6 py-4 bg-slate-50/70 border-b border-slate-200/80 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <span className="font-bold text-slate-900 text-sm">Daily Punch Log</span>
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  {formattedToday}
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  {formattedSelectedDate} {isToday ? '(Today)' : ''}
                 </span>
               </div>
               <div className="flex items-center gap-1.5 text-slate-500 text-xs font-medium">
@@ -393,12 +578,13 @@ export function Attendance() {
                     <th className="py-3 px-4">START WORK</th>
                     <th className="py-3 px-4">END WORK</th>
                     <th className="py-3 px-4">STATUS</th>
+                    <th className="py-3 px-4 text-right">ACTION</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
                   {isLoading ? (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-400 font-medium text-xs">
+                      <td colSpan={7} className="py-12 text-center text-slate-400 font-medium text-xs">
                         <div className="flex flex-col items-center justify-center gap-3">
                           <span className="w-6 h-6 rounded-full bg-red-500 animate-ping"></span>
                           <p className="text-slate-500 font-semibold">Loading daily attendance records...</p>
@@ -407,7 +593,7 @@ export function Attendance() {
                     </tr>
                   ) : filteredRecords.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-slate-400 font-medium text-xs">
+                      <td colSpan={7} className="py-12 text-center text-slate-400 font-medium text-xs">
                         No attendance logs found matching your criteria.
                       </td>
                     </tr>
@@ -509,6 +695,22 @@ export function Attendance() {
                                 <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span> Leave
                               </span>
                             )}
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleOpenEmployeeHistory(row)
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 text-xs font-bold transition-all border border-slate-200/70 hover:border-red-200 cursor-pointer shadow-xs"
+                              title={`View full monthly attendance for ${row.employeeName}`}
+                              type="button"
+                            >
+                              <span className="material-symbols-outlined text-[15px] text-red-600">
+                                calendar_month
+                              </span>
+                              <span>Monthly View</span>
+                            </button>
                           </td>
                         </tr>
                       )
@@ -621,17 +823,33 @@ export function Attendance() {
                   </div>
                 </div>
 
-                {/* Action Button */}
-                <button
-                  onClick={handleDownloadSheet}
-                  className="w-full mt-1 py-2.5 px-4 rounded-xl bg-red-50 hover:bg-red-100/80 text-red-700 font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                  type="button"
-                >
-                  <span className="material-symbols-outlined text-[17px]">
-                    picture_as_pdf
-                  </span>
-                  <span>Download Attendance Sheet (PDF)</span>
-                </button>
+                {/* Action Buttons */}
+                <div className="flex flex-col gap-2 mt-1">
+                  <button
+                    onClick={() => handleOpenEmployeeHistory(selectedRecord)}
+                    className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-bold text-xs shadow-md shadow-red-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">
+                      calendar_month
+                    </span>
+                    <span>View Full Monthly Attendance</span>
+                    <span className="material-symbols-outlined text-[16px]">
+                      arrow_forward
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={handleDownloadSheet}
+                    className="w-full py-2.5 px-4 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer border border-slate-200/80"
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">
+                      picture_as_pdf
+                    </span>
+                    <span>Download Attendance Sheet (PDF)</span>
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="bg-white border border-slate-200/80 rounded-2xl p-8 shadow-sm text-center text-slate-400 text-xs">

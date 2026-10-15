@@ -203,7 +203,10 @@ async function handleRequest(req: Request): Promise<Response> {
         email,
         role,
         status,
-        auth_user_id
+        auth_user_id,
+        created_at,
+        joining_date,
+        profile_photo_url
       `)
       .eq("auth_user_id", user.id)
       .maybeSingle();
@@ -314,6 +317,13 @@ async function handleRequest(req: Request): Promise<Response> {
       );
     }
 
+    if (action === "cancel_leave") {
+      return await handleCancelLeave(
+        employee,
+        body
+      );
+    }
+
     if (action === "leave_balance_adjustment") {
       return await handleLeaveBalanceAdjustment(
         employee,
@@ -354,6 +364,18 @@ async function handleRequest(req: Request): Promise<Response> {
 
     if (action === "update_employee_id") {
       return await handleUpdateEmployeeId(employee, body);
+    }
+
+    if (action === "delete_employee") {
+      return await handleDeleteEmployee(employee, body, user);
+    }
+
+    if (action === "update_profile_photo") {
+      return await handleUpdateProfilePhoto(employee, body);
+    }
+
+    if (action === "get_profile") {
+      return await handleGetProfile(employee);
     }
 
     // =========================================================
@@ -424,7 +446,10 @@ async function handleLogin(body: any) {
       email,
       role,
       status,
-      auth_user_id
+      auth_user_id,
+      created_at,
+      joining_date,
+      profile_photo_url
     `)
     .eq("employee_id", employeeId)
     .maybeSingle();
@@ -552,7 +577,15 @@ async function handleLogin(body: any) {
       name:
         employee.name,
       role:
-        employee.role
+        employee.role,
+      createdAt:
+        employee.created_at,
+      joiningDate:
+        employee.joining_date,
+      profilePhotoUrl:
+        employee.profile_photo_url || null,
+      avatar:
+        employee.profile_photo_url || null
     }
   });
 }
@@ -1011,6 +1044,27 @@ async function handleResumeWork(
   });
 }
 
+function isPast1159(dateString: string): boolean {
+  const todayIndia = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+  const dateOnly = String(dateString).slice(0, 10);
+  if (dateOnly < todayIndia) return true;
+  if (dateOnly > todayIndia) return false;
+  const now = new Date();
+  const indiaTimeStr = now.toLocaleTimeString("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  const [h, m] = indiaTimeStr.split(":").map(Number);
+  return h === 23 && m >= 59;
+}
+
 // =============================================================
 // ATTENDANCE FEED / PUNCH FEED (FOR NOTIFICATION PANEL)
 // =============================================================
@@ -1094,19 +1148,24 @@ async function handleAttendanceFeed(body: any) {
     }
 
     // 2. Check-out event
-    if (row.check_out) {
+    const isPast1159Date = isPast1159(row.attendance_date);
+    const [y, m, d] = String(row.attendance_date).slice(0, 10).split("-").map(Number);
+    const autoCheckoutUtc = new Date(Date.UTC(y, m - 1, d, 12, 30, 0)).toISOString();
+    const effectiveCheckOut = row.check_out || (isPast1159Date ? autoCheckoutUtc : null);
+
+    if (effectiveCheckOut) {
       let workedMins = row.worked_minutes;
       const breakSec = row.total_break_seconds ?? ((row.break_minutes ?? 0) * 60);
 
-      if ((workedMins == null || workedMins <= 0) && row.check_in && row.check_out) {
-        const diffMs = Math.max(0, new Date(row.check_out).getTime() - new Date(row.check_in).getTime());
+      if ((workedMins == null || workedMins <= 0) && row.check_in) {
+        const diffMs = Math.max(0, new Date(effectiveCheckOut).getTime() - new Date(row.check_in).getTime());
         const totalSec = Math.floor(diffMs / 1000);
         workedMins = Math.max(1, Math.round((totalSec - breakSec) / 60));
       }
 
       const durationText = formatWorkedDuration(
         row.check_in,
-        row.check_out,
+        effectiveCheckOut,
         workedMins,
         Math.round(breakSec / 60)
       );
@@ -1120,10 +1179,10 @@ async function handleAttendanceFeed(body: any) {
         employeeName,
         avatar,
         designation,
-        timestamp: row.check_out,
+        timestamp: effectiveCheckOut,
         checkInTime: row.check_in,
-        checkOutTime: row.check_out,
-        timeFormatted: formatTime(row.check_out),
+        checkOutTime: effectiveCheckOut,
+        timeFormatted: formatTime(effectiveCheckOut),
         date: row.attendance_date,
         workedMinutes: workedMins ?? 0,
         workedDuration: durationText,
@@ -1929,6 +1988,216 @@ async function handleRejectLeave(
 }
 
 // =============================================================
+// LEAVE CANCELLATION
+// =============================================================
+
+async function handleCancelLeave(
+  employee: any,
+  body: any
+): Promise<Response> {
+  try {
+    const suppliedId = String(
+      body.requestId ??
+      body.request_id ??
+      body.id ??
+      ""
+    ).trim();
+
+    const managerComment =
+      body.managerComment ??
+      body.manager_comment ??
+      null;
+
+    if (!suppliedId) {
+      return json({
+        success: false,
+        error: "missing_request_id",
+        message: "Leave request ID is required."
+      }, 400);
+    }
+
+    let leaveRecord: any = null;
+
+    const { data: requestIdLeave } = await adminClient
+      .from("leaves")
+      .select(`
+        id,
+        request_id,
+        employee_id,
+        leave_type,
+        from_date,
+        to_date,
+        leave_days,
+        paid_leave_days,
+        lop_days,
+        status,
+        manager_comment
+      `)
+      .eq("request_id", suppliedId)
+      .maybeSingle();
+
+    if (requestIdLeave) {
+      leaveRecord = requestIdLeave;
+    }
+
+    if (!leaveRecord) {
+      const { data: uuidLeave } = await adminClient
+        .from("leaves")
+        .select(`
+          id,
+          request_id,
+          employee_id,
+          leave_type,
+          from_date,
+          to_date,
+          leave_days,
+          paid_leave_days,
+          lop_days,
+          status,
+          manager_comment
+        `)
+        .eq("id", suppliedId)
+        .maybeSingle();
+
+      if (uuidLeave) {
+        leaveRecord = uuidLeave;
+      }
+    }
+
+    if (!leaveRecord) {
+      return json({
+        success: false,
+        error: "leave_not_found",
+        message: "Leave request could not be found.",
+        suppliedId
+      }, 404);
+    }
+
+    const currentStatus = String(leaveRecord.status ?? "").toLowerCase();
+
+    if (currentStatus === "cancelled") {
+      return json({
+        success: false,
+        error: "already_cancelled",
+        message: "This leave request is already cancelled.",
+        status: leaveRecord.status
+      }, 400);
+    }
+
+    const role = String(employee?.role ?? "").toLowerCase();
+    const isAdmin = role === "admin" || role === "super_admin" || employee?.is_admin === true;
+    const isOwner = employee.id === leaveRecord.employee_id;
+
+    if (!isAdmin && !isOwner) {
+      return json({
+        success: false,
+        error: "forbidden",
+        message: "You are not authorized to cancel this leave request."
+      }, 403);
+    }
+
+    // Employees can only cancel their own leaves when in pending state
+    if (!isAdmin && isOwner && currentStatus !== "pending") {
+      return json({
+        success: false,
+        error: "leave_not_pending",
+        message: `Only pending leave requests can be cancelled by an employee. This request is already ${leaveRecord.status}.`,
+        status: leaveRecord.status
+      }, 400);
+    }
+
+    // Admins can cancel leaves in pending or approved state
+    if (isAdmin && currentStatus !== "pending" && currentStatus !== "approved") {
+      return json({
+        success: false,
+        error: "invalid_status",
+        message: `Leave request in status '${leaveRecord.status}' cannot be cancelled.`,
+        status: leaveRecord.status
+      }, 400);
+    }
+
+    // If the leave was approved, refund the deducted paid leave days from employee's leave balance
+    if (currentStatus === "approved") {
+      const refundDays = Number(leaveRecord.paid_leave_days ?? leaveRecord.leave_days ?? 0);
+      const leaveType = String(leaveRecord.leave_type ?? "").toLowerCase();
+
+      if (refundDays > 0 && (leaveType === "casual" || leaveType === "sick")) {
+        const { data: balanceRecord } = await adminClient
+          .from("employee_leave_balances")
+          .select("*")
+          .eq("employee_id", leaveRecord.employee_id)
+          .eq("leave_type", leaveType)
+          .maybeSingle();
+
+        if (balanceRecord) {
+          const currentUsed = Number(balanceRecord.used_days ?? 0);
+          const newUsed = Math.max(0, currentUsed - refundDays);
+
+          await adminClient
+            .from("employee_leave_balances")
+            .update({
+              used_days: newUsed,
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", balanceRecord.id);
+        }
+      }
+    }
+
+    // Update leave status to cancelled
+    const finalComment = managerComment ?? (isAdmin ? "Cancelled by Administrator" : "Cancelled by Employee");
+    const { data: updatedLeave, error: updateError } = await adminClient
+      .from("leaves")
+      .update({
+        status: "cancelled",
+        manager_comment: finalComment,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", leaveRecord.id)
+      .select(`
+        id,
+        request_id,
+        employee_id,
+        from_date,
+        to_date,
+        leave_type,
+        reason,
+        leave_days,
+        paid_leave_days,
+        lop_days,
+        status,
+        approved_by,
+        approved_at,
+        manager_comment,
+        created_at,
+        updated_at
+      `)
+      .single();
+
+    if (updateError) {
+      return json({
+        success: false,
+        error: "cancel_leave_failed",
+        message: updateError.message
+      }, 500);
+    }
+
+    return json({
+      success: true,
+      message: "Leave request cancelled successfully.",
+      leave: formatLeave(updatedLeave)
+    });
+
+  } catch (error) {
+    return json({
+      success: false,
+      error: "cancel_leave_failed",
+      message: error instanceof Error ? error.message : "Failed to cancel leave request."
+    }, 500);
+  }
+}
+
+// =============================================================
 // LEAVE BALANCE
 // =============================================================
 
@@ -2467,6 +2736,22 @@ async function handleAttendanceMonthly(
       }, 400);
     }
 
+    let targetEmployee = employee;
+    const requestedEmpId = String(body?.employeeId ?? body?.employee_id ?? "").trim();
+    if (requestedEmpId) {
+      const isReqUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedEmpId);
+      let empQuery = adminClient.from("employees").select("*");
+      if (isReqUuid) {
+        empQuery = empQuery.or(`id.eq.${requestedEmpId},employee_id.eq.${requestedEmpId}`);
+      } else {
+        empQuery = empQuery.eq("employee_id", requestedEmpId);
+      }
+      const { data: foundEmp } = await empQuery.maybeSingle();
+      if (foundEmp) {
+        targetEmployee = foundEmp;
+      }
+    }
+
     function getIndiaDateString(date = new Date()): string {
       return new Intl.DateTimeFormat("en-CA", {
         timeZone: "Asia/Kolkata",
@@ -2534,7 +2819,7 @@ async function handleAttendanceMonthly(
         total_break_seconds,
         notes
       `)
-      .eq("employee_id", employee.id)
+      .eq("employee_id", targetEmployee.id)
       .gte("attendance_date", monthStart)
       .lt("attendance_date", nextMonthStart)
       .order("attendance_date", { ascending: true });
@@ -2546,6 +2831,35 @@ async function handleAttendanceMonthly(
         error: "attendance_monthly_failed",
         message: attendanceError.message
       }, 500);
+    }
+
+    // Auto-close any unclosed past shifts past 11:59 directly in database
+    for (const row of attendanceRows ?? []) {
+      const rowDate = String(row.attendance_date).slice(0, 10);
+      if (row.check_in && !row.check_out && isPast1159(rowDate)) {
+        const [y, m, d] = rowDate.split("-").map(Number);
+        const autoCheckoutUtc = new Date(Date.UTC(y, m - 1, d, 12, 30, 0)).toISOString();
+        const checkInTime = new Date(row.check_in).getTime();
+        const totalBreakSec = Math.max(0, Number(row.total_break_seconds ?? ((row.break_minutes ?? 0) * 60)));
+        let workedMinutes = 0;
+        if (Number.isFinite(checkInTime)) {
+          const grossSec = Math.max(0, Math.floor((new Date(autoCheckoutUtc).getTime() - checkInTime) / 1000));
+          workedMinutes = Math.max(1, Math.round((grossSec - totalBreakSec) / 60));
+        }
+        adminClient
+          .from("attendance")
+          .update({
+            check_out: autoCheckoutUtc,
+            worked_minutes: workedMinutes,
+            status: row.status === "late" || row.status === "half_day" ? row.status : "present",
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", row.id)
+          .then();
+
+        row.check_out = autoCheckoutUtc;
+        row.worked_minutes = workedMinutes;
+      }
     }
 
     // 2. Fetch approved leaves
@@ -2565,7 +2879,7 @@ async function handleAttendanceMonthly(
         lop_days,
         status
       `)
-      .eq("employee_id", employee.id)
+      .eq("employee_id", targetEmployee.id)
       .eq("status", "approved")
       .lte("from_date", addDays(nextMonthStart, -1))
       .gte("to_date", monthStart);
@@ -2665,15 +2979,28 @@ async function handleAttendanceMonthly(
       }
 
       // CASE 3: Historical attendance missing checkout
-      return 0;
+      // Employee checked in on a past day but forgot to check out.
+      // Credit hours from check-in up to shift end (18:00 IST / 12:30 UTC on that date) minus total break seconds.
+      const [year, month, day] = attDate.split("-").map(Number);
+      // 18:00 IST corresponds to 12:30 UTC
+      const shiftEndUtc = Date.UTC(year, month - 1, day, 12, 30, 0);
+      const grossEnd = Math.max(shiftEndUtc, checkInTime + 3600 * 1000);
+      const elapsedSeconds = Math.max(0, Math.floor((grossEnd - checkInTime) / 1000));
+      const netSeconds = Math.max(0, elapsedSeconds - totalBreakSec);
+      return netSeconds > 0 ? netSeconds : 60;
     }
 
     const daily: any[] = [];
     const attendanceList: any[] = [];
 
+    const employeeCreatedDate = (targetEmployee.joining_date || targetEmployee.created_at
+      ? String(targetEmployee.joining_date || targetEmployee.created_at).slice(0, 10)
+      : "1970-01-01");
+
     let totalActiveSeconds = 0;
     let totalBreakSecondsAll = 0;
     let requiredWorkingDays = 0;
+    let elapsedRequiredWorkingDays = 0;
     let approvedLeaveDays = 0;
     let publicHolidayDays = 0;
     let sundayDays = 0;
@@ -2683,10 +3010,17 @@ async function handleAttendanceMonthly(
     let currentDate = monthStart;
 
     while (currentDate < nextMonthStart) {
+      // 1. Skip any dates before the employee was created / joined
+      if (currentDate < employeeCreatedDate) {
+        currentDate = addDays(currentDate, 1);
+        continue;
+      }
+
       const sunday = isSunday(currentDate);
       const isApprovedLeave = approvedLeaveDates.has(currentDate);
       const isPublicHoliday = publicHolidayDates.has(currentDate);
       const att = attendanceMap.get(currentDate) ?? null;
+      const isPastOrToday = currentDate <= todayIndia;
 
       if (sunday) sundayDays++;
       if (isApprovedLeave) approvedLeaveDays++;
@@ -2695,6 +3029,9 @@ async function handleAttendanceMonthly(
       const isRequiredWorkingDay = !sunday && !isApprovedLeave && !isPublicHoliday;
       if (isRequiredWorkingDay) {
         requiredWorkingDays++;
+        if (isPastOrToday) {
+          elapsedRequiredWorkingDays++;
+        }
       }
 
       const activeSeconds = calculateActiveSeconds(att, currentDate);
@@ -2703,10 +3040,19 @@ async function handleAttendanceMonthly(
       const rowBreakSec = att ? Math.max(0, Number(att.total_break_seconds ?? (att.break_minutes ? att.break_minutes * 60 : 0))) : 0;
       totalBreakSecondsAll += rowBreakSec;
 
-      if (att?.check_in && att?.check_out) {
+      const hasPunch = Boolean(att?.check_in);
+      const isPast1159Date = isPast1159(currentDate);
+      const [y, m, d] = currentDate.split("-").map(Number);
+      const autoCheckoutUtc = new Date(Date.UTC(y, m - 1, d, 12, 30, 0)).toISOString();
+      const effectiveCheckOut = att?.check_out ?? (hasPunch && isPast1159Date ? autoCheckoutUtc : null);
+
+      const isCompleted = Boolean(hasPunch && effectiveCheckOut);
+      const isWorking = hasPunch && !effectiveCheckOut && currentDate === todayIndia;
+
+      if (isCompleted) {
         completedAttendanceDays++;
       }
-      if (att?.check_in && !att?.check_out && currentDate < todayIndia) {
+      if (isWorking) {
         incompleteAttendanceDays++;
       }
 
@@ -2714,56 +3060,65 @@ async function handleAttendanceMonthly(
       const activeHours = Math.floor(activeSeconds / 3600);
       const activeRemainingMinutes = Math.floor((activeSeconds % 3600) / 60);
 
-      const statusStr = isApprovedLeave
-        ? "leave"
-        : (att?.check_out
-            ? "present"
-            : (att?.check_in
-                ? (currentDate === todayIndia ? "working" : "incomplete")
-                : (isRequiredWorkingDay && currentDate < todayIndia ? "absent" : (isPublicHoliday ? "holiday" : "weekend"))));
+      // Prioritize actual punches: if employee punched in, mark as present/working
+      const statusStr = isCompleted
+        ? (att?.status || "present")
+        : (isWorking
+            ? "working"
+            : (hasPunch
+                ? (att?.status || "present")
+                : (isApprovedLeave
+                    ? "leave"
+                    : (sunday
+                        ? "weekend"
+                        : (isPublicHoliday
+                            ? "holiday"
+                            : (isPastOrToday ? "absent" : "upcoming"))))));
 
-      // 1. Android DTO item (for attendance: List<MonthlyAttendanceDto>)
-      attendanceList.push({
-        date: currentDate,
-        attendanceDate: currentDate,
-        attendance_date: currentDate,
-        employeeId: employee.employee_id,
-        employee_id: employee.employee_id,
-        name: employee.name ?? "",
-        login: formatTime(att?.check_in ?? null),
-        logout: formatTime(att?.check_out ?? null),
-        check_in: att?.check_in ?? null,
-        check_out: att?.check_out ?? null,
-        hours: formatDuration(activeMinutes),
-        active_formatted: formatDuration(activeMinutes),
-        breakFormatted: formatDuration(Math.round(rowBreakSec / 60)),
-        break_formatted: formatDuration(Math.round(rowBreakSec / 60)),
-        status: statusStr,
-        workedMinutes: activeMinutes,
-        worked_minutes: activeMinutes,
-        breakMinutes: Math.round(rowBreakSec / 60),
-        break_minutes: Math.round(rowBreakSec / 60)
-      });
+      // 1. Android DTO item - ONLY include past or today's dates (NO future dates)
+      if (isPastOrToday) {
+        attendanceList.push({
+          date: currentDate,
+          attendanceDate: currentDate,
+          attendance_date: currentDate,
+          employeeId: targetEmployee.employee_id,
+          employee_id: targetEmployee.employee_id,
+          name: targetEmployee.name ?? "",
+          login: formatTime(att?.check_in ?? null),
+          logout: formatTime(effectiveCheckOut ?? null),
+          check_in: att?.check_in ?? null,
+          check_out: effectiveCheckOut ?? null,
+          hours: formatDuration(activeMinutes),
+          active_formatted: formatDuration(activeMinutes),
+          breakFormatted: formatDuration(Math.round(rowBreakSec / 60)),
+          break_formatted: formatDuration(Math.round(rowBreakSec / 60)),
+          status: statusStr,
+          workedMinutes: activeMinutes,
+          worked_minutes: activeMinutes,
+          breakMinutes: Math.round(rowBreakSec / 60),
+          break_minutes: Math.round(rowBreakSec / 60)
+        });
 
-      // 2. Daily analytics item
-      daily.push({
-        attendance_date: currentDate,
-        is_sunday: sunday,
-        is_public_holiday: isPublicHoliday,
-        is_approved_leave: isApprovedLeave,
-        is_required_working_day: isRequiredWorkingDay,
-        check_in: att?.check_in ?? null,
-        check_out: att?.check_out ?? null,
-        break_started_at: att?.break_started_at ?? null,
-        total_break_seconds: rowBreakSec,
-        status: att?.status ?? statusStr,
-        active_seconds: Math.round(activeSeconds),
-        active_minutes: activeMinutes,
-        active_hours: activeHours,
-        active_remaining_minutes: activeRemainingMinutes,
-        attendance_complete: Boolean(att?.check_in && att?.check_out),
-        attendance_incomplete: Boolean(att?.check_in && !att?.check_out)
-      });
+        // 2. Daily analytics item
+        daily.push({
+          attendance_date: currentDate,
+          is_sunday: sunday,
+          is_public_holiday: isPublicHoliday,
+          is_approved_leave: isApprovedLeave,
+          is_required_working_day: isRequiredWorkingDay,
+          check_in: att?.check_in ?? null,
+          check_out: effectiveCheckOut ?? null,
+          break_started_at: att?.break_started_at ?? null,
+          total_break_seconds: rowBreakSec,
+          status: att?.status ?? statusStr,
+          active_seconds: Math.round(activeSeconds),
+          active_minutes: activeMinutes,
+          active_hours: activeHours,
+          active_remaining_minutes: activeRemainingMinutes,
+          attendance_complete: isCompleted,
+          attendance_incomplete: isWorking
+        });
+      }
 
       currentDate = addDays(currentDate, 1);
     }
@@ -2777,13 +3132,14 @@ async function handleAttendanceMonthly(
     const totalHoursFormatted = formatDuration(totalActiveMins);
 
     let averageHoursFormatted = "0h 00m";
-    const effectivePresentDays = completedAttendanceDays + (attendanceMap.get(todayIndia)?.check_in ? 1 : 0);
+    const effectivePresentDays = completedAttendanceDays + incompleteAttendanceDays;
     if (effectivePresentDays > 0) {
       const avgMins = Math.floor(totalActiveMins / effectivePresentDays);
       averageHoursFormatted = formatDuration(avgMins);
     }
 
-    const absentDaysCount = Math.max(0, requiredWorkingDays - effectivePresentDays);
+    const absentDaysCount = Math.max(0, elapsedRequiredWorkingDays - effectivePresentDays);
+    const presentPercent = requiredWorkingDays > 0 ? Math.round((effectivePresentDays / requiredWorkingDays) * 100) : 0;
 
     // Sort attendance descending (newest dates first) for Android timeline
     attendanceList.sort((a, b) => b.date.localeCompare(a.date));
@@ -2793,9 +3149,11 @@ async function handleAttendanceMonthly(
       message: "Monthly attendance loaded.",
       month,
       employee: {
-        id: employee.id,
-        employee_id: employee.employee_id,
-        name: employee.name
+        id: targetEmployee.id,
+        employee_id: targetEmployee.employee_id,
+        name: targetEmployee.name,
+        created_at: targetEmployee.created_at,
+        joining_date: targetEmployee.joining_date
       },
       summary: {
         month,
@@ -2804,6 +3162,8 @@ async function handleAttendanceMonthly(
         required_working_days: requiredWorkingDays,
         presentDays: effectivePresentDays,
         present_days: effectivePresentDays,
+        presentPercent: presentPercent,
+        present_percent: presentPercent,
         completed_attendance_days: completedAttendanceDays,
         absentDays: absentDaysCount,
         absent_days: absentDaysCount,
@@ -2840,8 +3200,12 @@ async function handleAttendanceMonthly(
         remaining_required_formatted: formatDuration(Math.round(remainingRequiredSeconds / 60)),
         overtime_seconds: overtimeSeconds,
         overtime_formatted: formatDuration(Math.round(overtimeSeconds / 60)),
+        overtimeFormatted: overtimeSeconds > 0 ? formatDuration(Math.round(overtimeSeconds / 60)) : "0h 00m",
         difference_seconds: Math.round(differenceSeconds),
         difference_formatted: differenceSeconds >= 0
+          ? `+${formatDuration(Math.round(differenceSeconds / 60))}`
+          : `-${formatDuration(Math.round(Math.abs(differenceSeconds) / 60))}`,
+        differenceFormatted: differenceSeconds >= 0
           ? `+${formatDuration(Math.round(differenceSeconds / 60))}`
           : `-${formatDuration(Math.round(Math.abs(differenceSeconds) / 60))}`
       },
@@ -3045,14 +3409,33 @@ async function handleUpdateEmployeeOrganization(employee: any, body: any): Promi
       }, 400);
     }
 
+    let departmentName: string | null = null;
+    if (departmentId) {
+      const { data: deptData } = await adminClient
+        .from("departments")
+        .select("department_name")
+        .eq("id", departmentId)
+        .maybeSingle();
+      if (deptData?.department_name) {
+        departmentName = deptData.department_name;
+      }
+    } else if (body.department) {
+      departmentName = String(body.department).trim();
+    }
+
+    const updateFields: Record<string, any> = {
+      reporting_manager_id: reportingManagerId,
+      department_id: departmentId,
+      work_shift_id: workShiftId,
+      updated_at: new Date().toISOString()
+    };
+    if (departmentName !== null) {
+      updateFields.department = departmentName;
+    }
+
     const { data: updatedEmployee, error: updateError } = await adminClient
       .from("employees")
-      .update({
-        reporting_manager_id: reportingManagerId,
-        department_id: departmentId,
-        work_shift_id: workShiftId,
-        updated_at: new Date().toISOString()
-      })
+      .update(updateFields)
       .eq("id", employeeId)
       .select(`
         id,
@@ -3061,6 +3444,7 @@ async function handleUpdateEmployeeOrganization(employee: any, body: any): Promi
         email,
         role,
         status,
+        department,
         reporting_manager_id,
         department_id,
         work_shift_id
@@ -3206,6 +3590,171 @@ async function handleUpdateEmployeeId(employee: any, body: any): Promise<Respons
   }
 }
 
+async function handleDeleteEmployee(caller: any, body: any, authUser: any): Promise<Response> {
+  try {
+    ensureAdmin(caller);
+
+    const targetEmployeeId = String(body.targetEmployeeId ?? body.employeeId ?? body.targetId ?? "").trim();
+    const password = String(body.password ?? "").trim();
+
+    if (!targetEmployeeId) {
+      return json({
+        success: false,
+        error: "missing_target_id",
+        message: "Target employee ID is required."
+      }, 400);
+    }
+
+    if (!password) {
+      return json({
+        success: false,
+        error: "missing_password",
+        message: "Administrator password is required."
+      }, 400);
+    }
+
+    // 1. Prevent deleting self
+    if (caller.id === targetEmployeeId || caller.employee_id === targetEmployeeId) {
+      return json({
+        success: false,
+        error: "cannot_delete_self",
+        message: "You cannot delete your own account."
+      }, 400);
+    }
+
+    // 2. Fetch the target employee
+    const { data: targetEmployee, error: targetError } = await adminClient
+      .from("employees")
+      .select("id, name, employee_id, role, auth_user_id")
+      .eq("id", targetEmployeeId)
+      .maybeSingle();
+
+    if (targetError) {
+      return json({
+        success: false,
+        error: "database_error",
+        message: targetError.message
+      }, 500);
+    }
+
+    if (!targetEmployee) {
+      return json({
+        success: false,
+        error: "employee_not_found",
+        message: "Employee not found."
+      }, 404);
+    }
+
+    // 3. Super Admin accounts are protected and cannot be deleted
+    if (targetEmployee.role === "super_admin") {
+      return json({
+        success: false,
+        error: "forbidden",
+        message: "Super Admin accounts are protected and cannot be deleted."
+      }, 403);
+    }
+
+    // 4. Verify calling admin / super admin password
+    const adminEmail = caller.email || authUser?.email;
+    if (!adminEmail) {
+      return json({
+        success: false,
+        error: "admin_email_missing",
+        message: "Administrator email not found for authentication."
+      }, 500);
+    }
+
+    const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
+      email: adminEmail,
+      password: password
+    });
+
+    if (authError || !authData.user) {
+      return json({
+        success: false,
+        error: "invalid_password",
+        message: "The password is wrong."
+      }, 401);
+    }
+
+    // 5. Password is verified! Perform deletion:
+    // Nullify reporting manager references pointing to target
+    await adminClient
+      .from("employees")
+      .update({ reporting_manager_id: null })
+      .eq("reporting_manager_id", targetEmployee.id);
+
+    // Delete attendance records
+    await adminClient
+      .from("attendance")
+      .delete()
+      .eq("employee_id", targetEmployee.id);
+
+    // Update leaves approved by this employee to null
+    await adminClient
+      .from("leaves")
+      .update({ approved_by: null })
+      .eq("approved_by", targetEmployee.id);
+
+    // Delete leaves records
+    await adminClient
+      .from("leaves")
+      .delete()
+      .eq("employee_id", targetEmployee.id);
+
+    // Delete leave balance records
+    await adminClient
+      .from("leave_balance_transactions")
+      .delete()
+      .eq("employee_id", targetEmployee.id);
+
+    await adminClient
+      .from("leave_accruals")
+      .delete()
+      .eq("employee_id", targetEmployee.id);
+
+    await adminClient
+      .from("employee_leave_balances")
+      .delete()
+      .eq("employee_id", targetEmployee.id);
+
+    // Delete the employee record from public.employees
+    const { error: deleteError } = await adminClient
+      .from("employees")
+      .delete()
+      .eq("id", targetEmployee.id);
+
+    if (deleteError) {
+      return json({
+        success: false,
+        error: "delete_failed",
+        message: deleteError.message
+      }, 500);
+    }
+
+    // If the employee has an auth user, delete from auth.users
+    if (targetEmployee.auth_user_id) {
+      try {
+        await adminClient.auth.admin.deleteUser(targetEmployee.auth_user_id);
+      } catch (authDelErr) {
+        console.warn("Could not delete auth user:", authDelErr);
+      }
+    }
+
+    return json({
+      success: true,
+      message: `Employee "${targetEmployee.name}" has been permanently deleted.`
+    });
+
+  } catch (error) {
+    return json({
+      success: false,
+      error: "delete_employee_failed",
+      message: error instanceof Error ? error.message : "Failed to delete employee."
+    }, 500);
+  }
+}
+
 // =============================================================
 // ATTENDANCE / TIME HELPERS
 // =============================================================
@@ -3296,6 +3845,123 @@ function calculateHours(
   const totalMinutes = Math.floor(netSeconds / 60);
 
   return formatDuration(totalMinutes);
+}
+
+// =============================================================
+// PROFILE PHOTO MANAGEMENT
+// =============================================================
+
+async function handleUpdateProfilePhoto(employee: any, body: any) {
+  try {
+    const rawPhoto = body.photo ?? body.profilePhoto ?? body.profile_photo_url ?? null;
+    const photo = typeof rawPhoto === "string" && rawPhoto.trim().length > 0 ? rawPhoto.trim() : null;
+
+    // Reject uncompressed payloads larger than 500KB to protect DB storage
+    if (photo && photo.length > 500000) {
+      return json(
+        {
+          success: false,
+          error: "payload_too_large",
+          message: "Profile photo is too large. Image must be compressed before saving."
+        },
+        400
+      );
+    }
+
+    const { error: updateError } = await adminClient
+      .from("employees")
+      .update({
+        profile_photo_url: photo,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", employee.id);
+
+    if (updateError) {
+      console.error("Profile photo update error:", updateError);
+      return json(
+        {
+          success: false,
+          error: "database_error",
+          message: "Failed to update profile photo in database.",
+          details: updateError.message
+        },
+        500
+      );
+    }
+
+    return json({
+      success: true,
+      message: photo ? "Profile photo updated successfully." : "Profile photo removed.",
+      profilePhotoUrl: photo
+    });
+  } catch (err) {
+    console.error("Unexpected error updating profile photo:", err);
+    return json(
+      {
+        success: false,
+        error: "server_error",
+        message: err instanceof Error ? err.message : "An unexpected server error occurred."
+      },
+      500
+    );
+  }
+}
+
+async function handleGetProfile(employee: any) {
+  try {
+    const { data: emp, error } = await adminClient
+      .from("employees")
+      .select(`
+        id,
+        employee_id,
+        name,
+        email,
+        role,
+        status,
+        created_at,
+        joining_date,
+        profile_photo_url,
+        reporting_manager_id,
+        department_id,
+        work_shift_id
+      `)
+      .eq("id", employee.id)
+      .maybeSingle();
+
+    if (error || !emp) {
+      return json(
+        {
+          success: false,
+          error: "not_found",
+          message: "Employee profile not found."
+        },
+        404
+      );
+    }
+
+    return json({
+      success: true,
+      employee: {
+        employeeId: emp.employee_id,
+        name: emp.name,
+        email: emp.email,
+        role: emp.role,
+        createdAt: emp.created_at,
+        joiningDate: emp.joining_date,
+        profilePhotoUrl: emp.profile_photo_url || null,
+        avatar: emp.profile_photo_url || null
+      }
+    });
+  } catch (err) {
+    return json(
+      {
+        success: false,
+        error: "server_error",
+        message: "Failed to fetch profile."
+      },
+      500
+    );
+  }
 }
 
 // =============================================================

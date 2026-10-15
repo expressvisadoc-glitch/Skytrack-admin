@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   getEmployeeHistory,
   updateEmployeeDetails,
+  deleteEmployee,
   type EmployeeDirectoryItem,
   type AttendanceHistoryItem,
   type LeaveHistoryItem,
@@ -19,10 +20,16 @@ interface EmployeeDetailsProps {
   employee?: EmployeeDirectoryItem | null
   onBack: () => void
   onEmployeeUpdated?: (updated: EmployeeDirectoryItem) => void
+  onEmployeeDeleted?: (deletedId: string) => void
 }
 
-export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeUpdated }: EmployeeDetailsProps) {
-  const { token, logout } = useAuth()
+export function EmployeeDetails({
+  employee: initialEmployee,
+  onBack,
+  onEmployeeUpdated,
+  onEmployeeDeleted,
+}: EmployeeDetailsProps) {
+  const { token, logout, employee: currentAdmin } = useAuth()
   const [currentEmp, setCurrentEmp] = useState<EmployeeDirectoryItem | null>(initialEmployee || null)
   const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryItem[]>([])
   const [leaveHistory, setLeaveHistory] = useState<LeaveHistoryItem[]>([])
@@ -32,12 +39,42 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Department options including Media
+  const departmentsList = useMemo(() => {
+    const list = orgData?.departments || []
+    if (list.length > 0) {
+      const hasMedia = list.some(d => d.department_name.toLowerCase() === 'media')
+      if (!hasMedia) {
+        return [...list, { id: '23b3dc10-5c15-46fc-a06c-3b5ca6319bc4', department_name: 'Media', department_code: 'MEDIA', status: 'active' }].sort((a, b) => a.department_name.localeCompare(b.department_name))
+      }
+      return list
+    }
+    return [
+      { id: 'b7df2304-d604-4104-99dc-8db2f1692a77', department_name: 'Accounts', department_code: 'ACCOUNTS', status: 'active' },
+      { id: '3184ea73-9f90-4692-b361-602269a55129', department_name: 'Business Development', department_code: 'BD', status: 'active' },
+      { id: '91b7ff98-84c7-4cb6-984e-3a37dc25ad81', department_name: 'Human Resources', department_code: 'HR', status: 'active' },
+      { id: '23b3dc10-5c15-46fc-a06c-3b5ca6319bc4', department_name: 'Media', department_code: 'MEDIA', status: 'active' },
+      { id: '99254f41-ebf4-42c7-a027-b869e94d4acb', department_name: 'Operations', department_code: 'OPS', status: 'active' },
+      { id: '556222ab-9703-40ac-a324-354b0db62eb0', department_name: 'Sales', department_code: 'SALES', status: 'active' },
+      { id: '370550f7-c0d2-41ee-9038-2ff9c941eebc', department_name: 'Visa Processing', department_code: 'VISA', status: 'active' },
+    ]
+  }, [orgData?.departments])
+
+  const handleDepartmentChange = (deptId: string) => {
+    const matched = departmentsList.find(d => d.id === deptId)
+    setEditFormData(prev => ({
+      ...prev,
+      departmentId: deptId,
+      department: matched ? matched.department_name : prev.department,
+    }))
+  }
+
   // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editFormData, setEditFormData] = useState({
     name: initialEmployee?.name || '',
-    employeeId: initialEmployee?.employee_id || '',
-    role: initialEmployee?.role || '',
+    employeeId: initialEmployee?.employee_id || initialEmployee?.code || '',
+    role: initialEmployee?.designation || initialEmployee?.role || '',
     department: initialEmployee?.department || '',
     email: initialEmployee?.email || '',
     phone: initialEmployee?.phone || '',
@@ -61,25 +98,59 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
   const [isAdjusting, setIsAdjusting] = useState(false)
   const [adjustError, setAdjustError] = useState<string | null>(null)
 
+  // Delete Employee 2FA Modal State
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [deleteStep, setDeleteStep] = useState<1 | 2>(1)
+  const [adminPassword, setAdminPassword] = useState('')
+  const [showAdminPassword, setShowAdminPassword] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteSuccessToast, setDeleteSuccessToast] = useState<string | null>(null)
+
+  const isSelf = Boolean(
+    currentAdmin &&
+      (currentAdmin.id === currentEmp?.id ||
+        (currentAdmin.employee_id && (currentAdmin.employee_id === currentEmp?.employee_id || currentAdmin.employee_id === currentEmp?.code)) ||
+        (currentAdmin.email && currentEmp?.email && currentAdmin.email.toLowerCase() === currentEmp.email.toLowerCase()))
+  )
+
+  const isTargetSuperAdmin = Boolean(
+    (currentEmp?.role && currentEmp.role.toLowerCase() === 'super_admin') ||
+    (initialEmployee?.role && initialEmployee.role.toLowerCase() === 'super_admin') ||
+    (currentEmp?.designation && currentEmp.designation.toLowerCase().includes('super admin')) ||
+    (initialEmployee?.designation && initialEmployee.designation.toLowerCase().includes('super admin')) ||
+    (currentEmp as any)?.user_role === 'super_admin' ||
+    (initialEmployee as any)?.user_role === 'super_admin'
+  )
+
   // Sync internal state if initial prop changes
   useEffect(() => {
     if (initialEmployee) {
       setCurrentEmp(initialEmployee)
+
+      let matchedDeptId = initialEmployee.departmentId || ''
+      if (!matchedDeptId && initialEmployee.department) {
+        const found = departmentsList.find(
+          d => d.department_name.toLowerCase() === initialEmployee.department.toLowerCase()
+        )
+        if (found) matchedDeptId = found.id
+      }
+
       setEditFormData({
         name: initialEmployee.name || '',
-        employeeId: initialEmployee.employee_id || '',
-        role: initialEmployee.role || '',
+        employeeId: initialEmployee.employee_id || initialEmployee.code || '',
+        role: initialEmployee.designation || initialEmployee.role || '',
         department: initialEmployee.department || '',
         email: initialEmployee.email || '',
         phone: initialEmployee.phone || '',
         accountStatus: initialEmployee.accountStatus || 'Active',
         avatar: initialEmployee.avatar || '',
         reportingManagerId: initialEmployee.reportingManagerId || '',
-        departmentId: initialEmployee.departmentId || '',
+        departmentId: matchedDeptId,
         workShiftId: initialEmployee.workShiftId || '',
       })
     }
-  }, [initialEmployee])
+  }, [initialEmployee, departmentsList])
 
   const loadHistory = useCallback(async () => {
     if (!token || !currentEmp?.id) return
@@ -129,10 +200,27 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
     setEditError(null)
 
     try {
+      let finalDeptId = editFormData.departmentId || null
+      let finalDeptName = editFormData.department.trim()
+
+      if (!finalDeptId && finalDeptName) {
+        const matched = departmentsList.find(d => d.department_name.toLowerCase() === finalDeptName.toLowerCase())
+        if (matched) {
+          finalDeptId = matched.id
+          finalDeptName = matched.department_name
+        }
+      } else if (finalDeptId) {
+        const matched = departmentsList.find(d => d.id === finalDeptId)
+        if (matched) {
+          finalDeptName = matched.department_name
+        }
+      }
+
       await updateEmployeeDetails(token, currentEmp.id, {
         name: editFormData.name.trim(),
         designation: editFormData.role.trim(),
-        department: editFormData.department.trim(),
+        department: finalDeptName,
+        department_id: finalDeptId,
         email: editFormData.email.trim(),
         phone: editFormData.phone.trim(),
         status: editFormData.accountStatus.toLowerCase(),
@@ -143,27 +231,29 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
         token,
         currentEmp.id,
         editFormData.reportingManagerId || null,
-        editFormData.departmentId || null,
+        finalDeptId,
         editFormData.workShiftId || null
       )
 
       const newEmployeeId = editFormData.employeeId.trim()
-      if (newEmployeeId && newEmployeeId !== currentEmp.employee_id) {
+      if (newEmployeeId && newEmployeeId !== (currentEmp.employee_id || currentEmp.code)) {
         await updateEmployeeId(token, currentEmp.id, newEmployeeId)
       }
 
       const updatedEmp: EmployeeDirectoryItem = {
         ...currentEmp,
         name: editFormData.name.trim(),
-        employee_id: editFormData.employeeId.trim(),
-        role: editFormData.role.trim(),
-        department: editFormData.department.trim(),
+        employee_id: newEmployeeId || currentEmp.employee_id,
+        code: newEmployeeId || currentEmp.code,
+        role: currentEmp.role || 'employee',
+        designation: editFormData.role.trim(),
+        department: finalDeptName,
         email: editFormData.email.trim(),
         phone: editFormData.phone.trim(),
         accountStatus: editFormData.accountStatus as 'Active' | 'Suspended' | 'Pending',
         avatar: editFormData.avatar.trim(),
         reportingManagerId: editFormData.reportingManagerId || null,
-        departmentId: editFormData.departmentId || null,
+        departmentId: finalDeptId,
         workShiftId: editFormData.workShiftId || null,
       }
 
@@ -205,9 +295,46 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
     }
   }
 
+  const handleDeleteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!token || !currentEmp?.id) return
+
+    if (isTargetSuperAdmin) {
+      setDeleteError('Super Admin accounts are protected and cannot be deleted.')
+      return
+    }
+
+    if (!adminPassword.trim()) {
+      setDeleteError('Please enter your administrator password.')
+      return
+    }
+
+    setIsDeleting(true)
+    setDeleteError(null)
+
+    try {
+      const res = await deleteEmployee(token, currentEmp.id, adminPassword.trim())
+      setIsDeleteModalOpen(false)
+      setDeleteSuccessToast(res.message || `Employee "${empName}" was deleted successfully.`)
+      setTimeout(() => {
+        onEmployeeDeleted?.(currentEmp.id)
+        onBack()
+      }, 900)
+    } catch (err: any) {
+      console.error('Delete employee error:', err)
+      if (err.message === 'SESSION_EXPIRED') {
+        logout()
+        return
+      }
+      setDeleteError(err.message || 'The password is wrong.')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   const empName = currentEmp?.name || 'Employee'
-  const empCode = currentEmp?.code || '—'
-  const empRole = currentEmp?.role || 'Field Personnel'
+  const empCode = currentEmp?.code || currentEmp?.employee_id || '—'
+  const empRole = currentEmp?.designation || currentEmp?.role || 'Field Personnel'
   const empDepartment = currentEmp?.department || 'Department Not Set'
   const empEmail = currentEmp?.email || '—'
   const empPhone = currentEmp?.phone || '—'
@@ -390,9 +517,9 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-slate-400 text-lg">corporate_fare</span>
                 <span className="text-sm font-semibold text-slate-800">
-                  {currentEmp?.departmentId && orgData?.departments.find(d => d.id === currentEmp.departmentId)
-                    ? orgData.departments.find(d => d.id === currentEmp.departmentId)?.department_name
-                    : <span className="text-slate-400 italic font-normal">Not assigned</span>}
+                  {currentEmp?.departmentId && (orgData?.departments?.find(d => d.id === currentEmp.departmentId) || departmentsList.find(d => d.id === currentEmp.departmentId))
+                    ? (orgData?.departments?.find(d => d.id === currentEmp.departmentId)?.department_name || departmentsList.find(d => d.id === currentEmp.departmentId)?.department_name)
+                    : (empDepartment !== 'Department Not Set' ? empDepartment : <span className="text-slate-400 italic font-normal">Not assigned</span>)}
                 </span>
               </div>
             </div>
@@ -524,14 +651,19 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                     <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                       Department *
                     </label>
-                    <input
-                      type="text"
+                    <select
                       required
-                      value={editFormData.department}
-                      onChange={(e) => setEditFormData({ ...editFormData, department: e.target.value })}
-                      placeholder="e.g. Visa Operations"
-                      className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium"
-                    />
+                      value={editFormData.departmentId}
+                      onChange={(e) => handleDepartmentChange(e.target.value)}
+                      className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium cursor-pointer"
+                    >
+                      <option value="">Select department</option>
+                      {departmentsList.map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.department_name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {/* Email */}
@@ -631,15 +763,11 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
                         </label>
                         <select
                           value={editFormData.departmentId}
-                          onChange={(e) => {
-                            const newDeptId = e.target.value;
-                            const newDeptName = orgData?.departments.find(d => d.id === newDeptId)?.department_name || editFormData.department;
-                            setEditFormData({ ...editFormData, departmentId: newDeptId, department: newDeptName })
-                          }}
-                          className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium"
+                          onChange={(e) => handleDepartmentChange(e.target.value)}
+                          className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium cursor-pointer"
                         >
                           <option value="">Select department</option>
-                          {orgData?.departments.map(d => (
+                          {departmentsList.map(d => (
                             <option key={d.id} value={d.id}>
                               {d.department_name}
                             </option>
@@ -1161,6 +1289,212 @@ export function EmployeeDetails({ employee: initialEmployee, onBack, onEmployeeU
             </div>
           </div>
         </div>
+
+        {/* Danger Zone: Delete Employee (Hidden for Super Admin accounts to protect administrative access) */}
+        {!isTargetSuperAdmin && (
+          <div className="w-full rounded-2xl bg-white border border-rose-200/80 shadow-sm p-6 overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-xl">delete_forever</span>
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Delete Employee Account</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Permanently remove {empName} and all associated attendance, shift, and leave records from SkyTrack.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null)
+                  setAdminPassword('')
+                  setDeleteStep(1)
+                  setIsDeleteModalOpen(true)
+                }}
+                disabled={isSelf}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm shadow-rose-600/20 hover:shadow-md hover:shadow-rose-600/30 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0 flex items-center justify-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[17px]">delete</span>
+                <span>Delete Employee</span>
+              </button>
+            </div>
+            {isSelf && (
+              <p className="text-[11px] text-amber-600 font-medium mt-3 flex items-center gap-1.5 pt-3 border-t border-slate-100">
+                <span className="material-symbols-outlined text-[15px]">info</span>
+                You cannot delete your own logged-in administrator account.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Delete Employee 2FA Modal */}
+        {isDeleteModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 md:p-8 max-w-md w-full flex flex-col gap-5 animate-in fade-in zoom-in-95 my-8">
+              
+              {/* Modal Header */}
+              <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">
+                      {deleteStep === 1 ? 'warning' : 'lock'}
+                    </span>
+                  </div>
+                  <div className="flex flex-col">
+                    <h3 className="text-base font-bold text-slate-900">
+                      {deleteStep === 1 ? 'Delete Employee' : 'Admin Password Verification'}
+                    </h3>
+                    <span className="text-[11px] font-semibold text-rose-600 uppercase tracking-wider">
+                      {deleteStep === 1 ? 'Step 1 of 2: Confirmation' : 'Step 2 of 2: Security 2FA'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteModalOpen(false)}
+                  className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-sm">close</span>
+                </button>
+              </div>
+
+              {deleteStep === 1 ? (
+                /* Step 1: Confirmation Prompt */
+                <div className="flex flex-col gap-4">
+                  <div className="p-4 rounded-2xl bg-rose-50/70 border border-rose-200/80 flex flex-col gap-2">
+                    <p className="text-sm font-bold text-rose-900 leading-snug">
+                      Are you sure you want to delete {empName}?
+                    </p>
+                    <p className="text-xs text-rose-700/90 leading-relaxed">
+                      This action will permanently remove <span className="font-semibold text-rose-900">{empName}</span> ({empCode}) and erase all corresponding attendance history, shift schedules, and leave records.
+                    </p>
+                  </div>
+
+                  <p className="text-xs text-slate-500">
+                    To prevent accidental deletions, you will be required to authenticate with your administrator password in the next step.
+                  </p>
+
+                  <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setIsDeleteModalOpen(false)}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteStep(2)
+                        setDeleteError(null)
+                        setAdminPassword('')
+                      }}
+                      className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm shadow-rose-600/20 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <span>Yes</span>
+                      <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Step 2: Password Authentication */
+                <form onSubmit={handleDeleteSubmit} className="flex flex-col gap-4">
+                  <div className="text-xs text-slate-600 leading-relaxed">
+                    Please enter your administrator password (<span className="font-semibold text-slate-900">{currentAdmin?.name || currentAdmin?.email || 'Logged-in Admin'}</span>) to authorize deleting <span className="font-semibold text-rose-700">{empName}</span>.
+                  </div>
+
+                  {deleteError && (
+                    <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                      <span className="material-symbols-outlined text-[18px] shrink-0">error</span>
+                      <span>{deleteError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Admin Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showAdminPassword ? 'text' : 'password'}
+                        required
+                        autoFocus
+                        value={adminPassword}
+                        onChange={(e) => {
+                          setAdminPassword(e.target.value)
+                          if (deleteError) setDeleteError(null)
+                        }}
+                        placeholder="Enter your password"
+                        className="w-full h-11 pl-3.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-500/10 transition-all font-medium"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminPassword(!showAdminPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {showAdminPassword ? 'visibility_off' : 'visibility'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteStep(1)}
+                      disabled={isDeleting}
+                      className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsDeleteModalOpen(false)}
+                      disabled={isDeleting}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isDeleting || !adminPassword.trim()}
+                      className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm shadow-rose-600/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      {isDeleting ? (
+                        <>
+                          <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                          <span>Verifying...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                          <span>Delete</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+            </div>
+          </div>
+        )}
+
+        {/* Delete Success Toast */}
+        {deleteSuccessToast && (
+          <div className="fixed bottom-6 right-6 z-50 p-4 rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-800 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-lg">check_circle</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-white">Employee Deleted</span>
+              <span className="text-[11px] text-slate-300">{deleteSuccessToast}</span>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   )

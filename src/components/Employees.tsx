@@ -143,7 +143,7 @@ export function Employees() {
         !q ||
         emp.name.toLowerCase().includes(q) ||
         emp.code.toLowerCase().includes(q) ||
-        emp.role.toLowerCase().includes(q) ||
+        (emp.designation || emp.role).toLowerCase().includes(q) ||
         emp.department.toLowerCase().includes(q)
 
       const matchesFilter =
@@ -160,12 +160,18 @@ export function Employees() {
     setSelectedEmployee(updated)
   }
 
+  const handleEmployeeDeleted = (deletedId: string) => {
+    setEmployees((prev) => prev.filter((e) => e.id !== deletedId))
+    setSelectedEmployee(null)
+  }
+
   if (selectedEmployee) {
     return (
       <EmployeeDetails
         employee={selectedEmployee}
         onBack={() => setSelectedEmployee(null)}
         onEmployeeUpdated={handleEmployeeUpdated}
+        onEmployeeDeleted={handleEmployeeDeleted}
       />
     )
   }
@@ -433,7 +439,7 @@ export function Employees() {
                             <span className="text-sm font-semibold text-slate-900 truncate group-hover:text-red-600 transition-colors">
                               {emp.name}
                             </span>
-                            <span className="text-xs text-slate-500">{emp.role}</span>
+                            <span className="text-xs text-slate-500">{emp.designation || emp.role}</span>
                           </div>
                         </div>
                       </td>

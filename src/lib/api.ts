@@ -336,8 +336,43 @@ async function patchSupabaseRest<T = any>(
   return text ? JSON.parse(text) : ({} as T)
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isUuid(val?: string | null): boolean {
+  if (!val) return false
+  return UUID_REGEX.test(val.trim())
+}
+
 /**
- * Formats an ISO date or timestamp into readable 12-hour time string (e.g. 09:58 AM)
+ * Checks if the current time in IST (Asia/Kolkata) is at or past 11:59 PM (23:59)
+ */
+export function isCurrentTimePast1159(): boolean {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+      hour: 'numeric',
+      minute: 'numeric',
+    }).formatToParts(new Date())
+    const h = Number(parts.find(p => p.type === 'hour')?.value ?? 0)
+    const m = Number(parts.find(p => p.type === 'minute')?.value ?? 0)
+    return h === 23 && m >= 59
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Returns true if the target date has passed 11:59 PM (all past dates, or today if >= 23:59 IST)
+ */
+export function isDatePast1159(dateStr: string, todayIso: string): boolean {
+  if (dateStr < todayIso) return true
+  if (dateStr > todayIso) return false
+  return isCurrentTimePast1159()
+}
+
+/**
+ * Formats an ISO date or timestamp into readable 12-hour time string in IST (e.g. 06:00 PM)
  */
 function formatTime(isoStr?: string | null): string {
   if (!isoStr) return '—'
@@ -348,6 +383,7 @@ function formatTime(isoStr?: string | null): string {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
+      timeZone: 'Asia/Kolkata',
     })
   } catch {
     return '—'
@@ -923,13 +959,28 @@ export async function getEmployeeHistory(
   attendanceHistory: AttendanceHistoryItem[]
   leaveHistory: LeaveHistoryItem[]
 }> {
+  let resolvedUuid = employeeDbId
+  if (!isUuid(employeeDbId)) {
+    try {
+      const emp = await fetchSupabaseRest<SkyTrackEmployee[]>(
+        `employees?employee_id=eq.${employeeDbId}&select=id&limit=1`,
+        token
+      )
+      if (emp?.[0]?.id) {
+        resolvedUuid = emp[0].id
+      }
+    } catch (lookupErr) {
+      console.warn('Error resolving employeeDbId to UUID:', lookupErr)
+    }
+  }
+
   const [attendanceData, leavesData] = await Promise.all([
     fetchSupabaseRest<any[]>(
-      `attendance?employee_id=eq.${employeeDbId}&order=attendance_date.desc&limit=30`,
+      `attendance?employee_id=eq.${resolvedUuid}&order=attendance_date.desc&limit=30`,
       token
     ),
     fetchSupabaseRest<any[]>(
-      `leaves?employee_id=eq.${employeeDbId}&order=created_at.desc&limit=30`,
+      `leaves?employee_id=eq.${resolvedUuid}&order=created_at.desc&limit=30`,
       token
     ),
   ])
@@ -1013,6 +1064,41 @@ export interface FullAttendanceRecord {
     time: string
     status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave'
   }[]
+  joiningDate?: string
+  created_at?: string
+  email?: string
+  phone?: string
+}
+
+/**
+ * Accurately compute worked minutes taking into account breaks and historical unclosed punches
+ */
+function computeWorkedMinutes(att: any, targetDate: string, isToday: boolean): number {
+  if (!att?.check_in) return 0
+  const breakMins = att.break_minutes ?? (att.total_break_seconds ? Math.round(att.total_break_seconds / 60) : 0)
+  if (att.worked_minutes != null && att.worked_minutes > 0) {
+    return att.worked_minutes
+  }
+  const checkInTime = new Date(att.check_in).getTime()
+  if (!Number.isFinite(checkInTime)) return 0
+
+  if (att.check_out) {
+    const checkOutTime = new Date(att.check_out).getTime()
+    if (!Number.isFinite(checkOutTime)) return 0
+    return Math.max(0, Math.floor((checkOutTime - checkInTime) / 60000) - breakMins)
+  }
+
+  if (isToday) {
+    return Math.max(0, Math.floor((Date.now() - checkInTime) / 60000) - breakMins)
+  }
+
+  // Historical punch missing checkout: credit until shift end (18:00 IST / 12:30 UTC) minus breaks
+  const [y, m, d] = targetDate.split('-').map(Number)
+  const shiftEndUtc = Date.UTC(y, m - 1, d, 12, 30, 0)
+  const grossEnd = Math.max(shiftEndUtc, checkInTime + 3600 * 1000)
+  const grossMins = Math.max(0, Math.floor((grossEnd - checkInTime) / 60000))
+  const netMins = Math.max(0, grossMins - breakMins)
+  return netMins > 0 ? netMins : 60
 }
 
 /**
@@ -1032,7 +1118,9 @@ export async function getDailyAttendance(
     leave: number
   }
 }> {
-  const targetDate = targetDateStr || new Date().toISOString().slice(0, 10)
+  const todayIso = new Date().toISOString().slice(0, 10)
+  const targetDate = targetDateStr || todayIso
+  const isTargetToday = targetDate === todayIso
 
   const [employeesData, attendanceData, leavesData, allRecentAttendance, deptsData, shiftsData] =
     await Promise.all([
@@ -1077,14 +1165,24 @@ export async function getDailyAttendance(
     let status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' = 'Absent'
     let startWork = '—'
     let endWork = '—'
+    let workedMinutes: number | null = null
+    let breakMinutes: number | null = null
+    let activeHours: string | undefined
 
-    if (attRecord) {
+    if (attRecord && attRecord.check_in) {
       startWork = formatTime(attRecord.check_in)
+      const past1159 = isDatePast1159(targetDate, todayIso)
       if (attRecord.check_out) {
         endWork = formatTime(attRecord.check_out)
-      } else if (attRecord.check_in) {
-        endWork = '— (In Progress)'
+      } else {
+        endWork = past1159 ? '06:00 PM' : '— (In Progress)'
       }
+
+      breakMinutes = attRecord.break_minutes ?? (attRecord.total_break_seconds ? Math.round(attRecord.total_break_seconds / 60) : 0)
+      workedMinutes = computeWorkedMinutes(attRecord, targetDate, isTargetToday)
+      const h = Math.floor(workedMinutes / 60)
+      const m = workedMinutes % 60
+      activeHours = `${h}h ${String(m).padStart(2, '0')}m`
 
       const rawStatus = (attRecord.status || '').toLowerCase()
       if (rawStatus === 'late') {
@@ -1093,12 +1191,6 @@ export async function getDailyAttendance(
       } else if (rawStatus === 'half_day' || rawStatus === 'half day') {
         status = 'Half Day'
         halfDayCount++
-      } else if (rawStatus === 'leave') {
-        status = 'Leave'
-        leaveCount++
-      } else if (rawStatus === 'absent') {
-        status = 'Absent'
-        absentCount++
       } else {
         status = 'Present'
         presentCount++
@@ -1117,18 +1209,19 @@ export async function getDailyAttendance(
     )
 
     const history = empPastAttendance.slice(0, 5).map((a) => {
-      const isToday = a.attendance_date === targetDate
-      const dateLabel = isToday ? `${formatDate(a.attendance_date)} (Today)` : formatDate(a.attendance_date)
+      const isHistoryItemToday = a.attendance_date === todayIso
+      const dateLabel = isHistoryItemToday ? `${formatDate(a.attendance_date)} (Today)` : formatDate(a.attendance_date)
       const inTime = formatTime(a.check_in)
-      const outTime = a.check_out ? formatTime(a.check_out) : isToday ? 'Ongoing' : '—'
-      const timeStr = `${inTime} — ${outTime}`
+      const past1159 = isDatePast1159(a.attendance_date, todayIso)
+      const outTime = a.check_out ? formatTime(a.check_out) : isHistoryItemToday && !past1159 ? 'Ongoing' : '06:00 PM'
+      const timeStr = a.check_out || past1159 ? `${inTime} — ${outTime}` : `${inTime} (${outTime})`
 
       let histStatus: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' = 'Present'
       const raw = (a.status || '').toLowerCase()
       if (raw === 'late') histStatus = 'Late'
       else if (raw === 'half_day' || raw === 'half day') histStatus = 'Half Day'
-      else if (raw === 'leave') histStatus = 'Leave'
-      else if (raw === 'absent') histStatus = 'Absent'
+      else if (raw === 'leave' && !a.check_in) histStatus = 'Leave'
+      else if (raw === 'absent' && !a.check_in) histStatus = 'Absent'
 
       return {
         date: dateLabel,
@@ -1146,13 +1239,6 @@ export async function getDailyAttendance(
           .join('')
           .toUpperCase()
       : 'SK'
-
-    let activeHours: string | undefined
-    if (attRecord?.worked_minutes != null) {
-      const h = Math.floor(attRecord?.worked_minutes / 60)
-      const m = attRecord.worked_minutes % 60
-      activeHours = `${h}h ${String(m).padStart(2, '0')}m`
-    }
 
     let shiftStart = '09:00 AM'
     let shiftEnd = '06:00 PM'
@@ -1179,10 +1265,14 @@ export async function getDailyAttendance(
       startWork,
       endWork,
       status,
-      workedMinutes: attRecord?.worked_minutes ?? null,
-      breakMinutes: attRecord?.break_minutes ?? null,
+      workedMinutes,
+      breakMinutes,
       activeHours,
       history,
+      joiningDate: emp.joining_date || emp.created_at,
+      created_at: emp.created_at,
+      email: emp.email,
+      phone: emp.phone,
     }
   })
 
@@ -1196,6 +1286,495 @@ export async function getDailyAttendance(
       halfDay: halfDayCount,
       leave: leaveCount,
     },
+  }
+}
+
+export interface MonthlyAttendanceDay {
+  date: string
+  dayOfWeek: string
+  dayNumber: number
+  status: 'present' | 'late' | 'working' | 'half_day' | 'leave' | 'weekend' | 'holiday' | 'absent' | 'incomplete' | 'upcoming'
+  statusLabel: string
+  checkIn: string
+  checkOut: string
+  rawCheckIn?: string | null
+  rawCheckOut?: string | null
+  breakMinutes: number
+  breakFormatted: string
+  workedMinutes: number
+  hours: string
+  isSunday: boolean
+  isHoliday: boolean
+  isLeave: boolean
+  leaveType?: string
+  holidayName?: string
+  notes?: string
+}
+
+export interface MonthlyAttendanceSummary {
+  month: string
+  monthName: string
+  requiredWorkingDays: number
+  presentDays: number
+  absentDays: number
+  leaveDays: number
+  holidayDays: number
+  sundayDays: number
+  presentPercent: number
+  totalWorkedMinutes: number
+  totalHours: string
+  averageHours: string
+  totalBreakMinutes: number
+  overtimeHours: string
+  targetHours: string
+  differenceFormatted: string
+}
+
+export interface EmployeeMonthlyAttendanceResult {
+  employee: {
+    id: string
+    employeeId: string
+    name: string
+    role: string
+    department: string
+    joiningDate?: string
+    created_at?: string
+    avatar?: string
+    email?: string
+    phone?: string
+  }
+  month: string
+  monthName: string
+  availableMonths: { value: string; label: string }[]
+  summary: MonthlyAttendanceSummary
+  days: MonthlyAttendanceDay[]
+}
+
+/**
+ * Computes the selectable months starting strictly from the employee's added/joining date up to the current month.
+ */
+export function getSelectableMonthsForEmployee(joiningOrCreatedDate?: string | null): { value: string; label: string }[] {
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonth = now.getMonth() // 0-indexed
+
+  let startYear = currentYear
+  let startMonth = currentMonth
+
+  if (joiningOrCreatedDate) {
+    const d = new Date(joiningOrCreatedDate)
+    if (!isNaN(d.getFullYear()) && !isNaN(d.getMonth())) {
+      startYear = d.getFullYear()
+      startMonth = d.getMonth()
+    }
+  }
+
+  // Ensure start is not in future
+  if (startYear > currentYear || (startYear === currentYear && startMonth > currentMonth)) {
+    startYear = currentYear
+    startMonth = currentMonth
+  }
+
+  const months: { value: string; label: string }[] = []
+  let y = startYear
+  let m = startMonth
+
+  while (y < currentYear || (y === currentYear && m <= currentMonth)) {
+    const val = `${y}-${String(m + 1).padStart(2, '0')}`
+    const dateObj = new Date(Date.UTC(y, m, 1))
+    const label = dateObj.toLocaleDateString('en-US', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+    months.push({ value: val, label })
+    m++
+    if (m > 11) {
+      m = 0
+      y++
+    }
+  }
+
+  // Return descending (newest month first)
+  return months.reverse()
+}
+
+/**
+ * Fetches complete monthly attendance for a specific employee with selectable months starting from joining date.
+ */
+export async function getEmployeeMonthlyAttendance(
+  token: string,
+  employeeIdentifier: string,
+  targetMonth?: string
+): Promise<EmployeeMonthlyAttendanceResult> {
+  // 1. Fetch employee record safely based on whether employeeIdentifier is a UUID
+  const isIdUuid = isUuid(employeeIdentifier)
+  const employeeQuery = isIdUuid
+    ? `employees?or=(id.eq.${employeeIdentifier},employee_id.eq.${employeeIdentifier})&select=*&limit=1`
+    : `employees?employee_id=eq.${employeeIdentifier}&select=*&limit=1`
+
+  const empData = await fetchSupabaseRest<SkyTrackEmployee[]>(
+    employeeQuery,
+    token
+  )
+  const emp = empData?.[0]
+  if (!emp) {
+    throw new Error(`Employee with ID ${employeeIdentifier} not found.`)
+  }
+
+  // 2. Compute available months starting from the day employee was added
+  const availableMonths = getSelectableMonthsForEmployee(emp.joining_date || emp.created_at)
+  const selectedMonth = targetMonth && availableMonths.some(m => m.value === targetMonth)
+    ? targetMonth
+    : availableMonths[0]?.value || new Date().toISOString().slice(0, 7)
+
+  const selectedMonthLabel = availableMonths.find(m => m.value === selectedMonth)?.label || selectedMonth
+
+  // 3. Try edge function first
+  try {
+    const res = await fetchSkyTrackApi<any>(token, {
+      action: 'attendance_monthly',
+      employeeId: emp.employee_id || emp.id,
+      month: selectedMonth,
+    })
+
+    if (res && res.success) {
+      const todayIso = new Date().toISOString().slice(0, 10)
+      const summary = res.summary || {}
+      const mappedDays: MonthlyAttendanceDay[] = (res.attendance || []).map((att: any) => {
+        const d = new Date(att.date + 'T12:00:00')
+        const dayNumber = !isNaN(d.getDate()) ? d.getDate() : 1
+        const dayOfWeek = !isNaN(d.getDay())
+          ? d.toLocaleDateString('en-US', { weekday: 'short' })
+          : ''
+
+        const hasPunch = Boolean(att.login || att.check_in)
+        const past1159 = isDatePast1159(att.date, todayIso)
+        const autoCheckOutIso = `${att.date}T12:30:00.000Z`
+        const effectiveCheckOutIso = att.check_out || (hasPunch && past1159 ? autoCheckOutIso : null)
+
+        let resolvedStatus = att.status || 'present'
+        if (hasPunch && (resolvedStatus === 'leave' || resolvedStatus === 'absent' || resolvedStatus === 'incomplete')) {
+          resolvedStatus = 'present'
+        }
+
+        let statusLabel = 'Present'
+        if (resolvedStatus === 'working' && !past1159) statusLabel = 'Working Live'
+        else if (resolvedStatus === 'late') statusLabel = 'Late'
+        else if (resolvedStatus === 'half_day') statusLabel = 'Half Day'
+        else if (resolvedStatus === 'leave') statusLabel = 'Approved Leave'
+        else if (resolvedStatus === 'holiday') statusLabel = 'Public Holiday'
+        else if (resolvedStatus === 'weekend') statusLabel = 'Sunday Off'
+        else if (resolvedStatus === 'absent') statusLabel = 'Absent'
+        else if (resolvedStatus === 'incomplete') statusLabel = 'Present'
+        else if (hasPunch && !att.logout && !att.check_out && !past1159) {
+          statusLabel = 'Working Live'
+        } else if (hasPunch) {
+          statusLabel = 'Present'
+        }
+
+        const breakMins = att.breakMinutes ?? (att.total_break_seconds ? Math.round(att.total_break_seconds / 60) : (att.break_minutes ?? 0))
+        let workedMinutes = att.workedMinutes ?? 0
+        let hours = att.hours || '0h 00m'
+
+        if (hasPunch && (workedMinutes <= 0 || hours === '0h 00m' || hours === '00:00')) {
+          workedMinutes = computeWorkedMinutes(
+            { check_in: att.check_in, check_out: effectiveCheckOutIso, break_minutes: breakMins, total_break_seconds: att.total_break_seconds },
+            att.date,
+            att.date === todayIso && !past1159
+          )
+          hours = `${Math.floor(workedMinutes / 60)}h ${String(workedMinutes % 60).padStart(2, '0')}m`
+        }
+
+        const breakFormatted = (att.breakFormatted && att.breakFormatted !== '0m')
+          ? att.breakFormatted
+          : (breakMins > 0 ? `${Math.floor(breakMins / 60)}h ${String(breakMins % 60).padStart(2, '0')}m` : '0m')
+
+        const formattedCheckOut = (resolvedStatus === 'working' && !past1159)
+          ? 'Active / In Progress'
+          : (att.logout && att.logout !== '00:00'
+              ? (att.logout === '18:00' ? '06:00 PM' : att.logout)
+              : (effectiveCheckOutIso ? formatTime(effectiveCheckOutIso) : (hasPunch && past1159 ? '06:00 PM' : '—')))
+
+        return {
+          date: att.date,
+          dayOfWeek,
+          dayNumber,
+          status: resolvedStatus,
+          statusLabel,
+          checkIn: att.login || (att.check_in ? formatTime(att.check_in) : '—'),
+          checkOut: formattedCheckOut,
+          rawCheckIn: att.check_in,
+          rawCheckOut: effectiveCheckOutIso,
+          breakMinutes: breakMins,
+          breakFormatted,
+          workedMinutes,
+          hours,
+          isSunday: resolvedStatus === 'weekend',
+          isHoliday: resolvedStatus === 'holiday',
+          isLeave: resolvedStatus === 'leave',
+          notes: att.notes || (resolvedStatus === 'working' && !past1159 ? 'Shift currently in progress' : undefined),
+        }
+      })
+
+      const presentCountFromDays = mappedDays.filter(d => d.status === 'present' || d.status === 'working' || d.checkIn !== '—').length
+      const totalMinsFromDays = mappedDays.reduce((acc, d) => acc + (d.workedMinutes || 0), 0)
+      const resolvedPresentDays = Math.max(summary.presentDays ?? summary.present_days ?? 0, presentCountFromDays)
+      const resolvedWorkedMins = Math.max(summary.totalWorkedMinutes ?? summary.total_worked_minutes ?? 0, totalMinsFromDays)
+      const resolvedTotalHours = `${Math.floor(resolvedWorkedMins / 60)}h ${String(resolvedWorkedMins % 60).padStart(2, '0')}m`
+      const resolvedAvgHours = resolvedPresentDays > 0
+        ? `${Math.floor(Math.floor(resolvedWorkedMins / resolvedPresentDays) / 60)}h ${String(Math.floor(resolvedWorkedMins / resolvedPresentDays) % 60).padStart(2, '0')}m`
+        : '0h 00m'
+
+      return {
+        employee: {
+          id: emp.id || '',
+          employeeId: emp.employee_id || emp.employeeId || '—',
+          name: emp.name || 'Unnamed Employee',
+          role: emp.designation || emp.role || 'Employee',
+          department: emp.department || 'Department Not Set',
+          joiningDate: emp.joining_date || emp.created_at,
+          created_at: emp.created_at,
+          avatar: emp.profile_photo_url || emp.avatar_url,
+          email: emp.email,
+          phone: emp.phone,
+        },
+        month: selectedMonth,
+        monthName: selectedMonthLabel,
+        availableMonths,
+        summary: {
+          month: selectedMonth,
+          monthName: selectedMonthLabel,
+          requiredWorkingDays: summary.workingDays ?? summary.required_working_days ?? 0,
+          presentDays: resolvedPresentDays,
+          absentDays: summary.absentDays ?? summary.absent_days ?? 0,
+          leaveDays: summary.leaveDays ?? summary.leave_days ?? 0,
+          holidayDays: summary.public_holiday_days ?? 0,
+          sundayDays: summary.sunday_days ?? 0,
+          presentPercent: summary.presentPercent ?? summary.present_percent ?? 0,
+          totalWorkedMinutes: resolvedWorkedMins,
+          totalHours: resolvedTotalHours,
+          averageHours: resolvedAvgHours,
+          totalBreakMinutes: summary.totalBreakMinutes ?? summary.total_break_minutes ?? 0,
+          overtimeHours: summary.overtimeFormatted ?? summary.overtime_formatted ?? '0h 00m',
+          targetHours: summary.target_hours_formatted ?? summary.targetHoursFormatted ?? '0h 00m',
+          differenceFormatted: summary.differenceFormatted ?? summary.difference_formatted ?? '0h 00m',
+        },
+        days: mappedDays,
+      }
+    }
+  } catch (edgeErr) {
+    console.warn('Edge function attendance_monthly fallback to Supabase REST:', edgeErr)
+  }
+
+  // 4. Robust Fallback: Build directly from Supabase REST
+  const [yearStr, monthNumStr] = selectedMonth.split('-')
+  const y = parseInt(yearStr, 10)
+  const m = parseInt(monthNumStr, 10)
+  const monthStart = `${selectedMonth}-01`
+  const nextMonthDate = new Date(Date.UTC(y, m, 1))
+  const nextMonthStart = nextMonthDate.toISOString().slice(0, 10)
+  const todayIso = new Date().toISOString().slice(0, 10)
+
+  const [attRows, leaveRows, holidayRows] = await Promise.all([
+    fetchSupabaseRest<any[]>(
+      `attendance?employee_id=eq.${emp.id}&attendance_date=gte.${monthStart}&attendance_date=lt.${nextMonthStart}&order=attendance_date.desc`,
+      token
+    ),
+    fetchSupabaseRest<any[]>(
+      `leaves?employee_id=eq.${emp.id}&status=eq.approved&from_date=lte.${nextMonthStart}&to_date=gte.${monthStart}`,
+      token
+    ),
+    fetchSupabaseRest<any[]>(
+      `public_holidays?status=eq.published&holiday_date=gte.${monthStart}&holiday_date=lt.${nextMonthStart}`,
+      token
+    ),
+  ])
+
+  const attendanceList = attRows || []
+  const leavesList = leaveRows || []
+  const holidaysList = holidayRows || []
+
+  const attMap = new Map<string, any>()
+  for (const a of attendanceList) {
+    attMap.set(a.attendance_date, a)
+  }
+
+  const holidaySet = new Map<string, string>()
+  for (const h of holidaysList) {
+    holidaySet.set(String(h.holiday_date).slice(0, 10), h.holiday_name || 'Public Holiday')
+  }
+
+  const addedDateIso = (emp.joining_date || emp.created_at || '1970-01-01').slice(0, 10)
+  const days: MonthlyAttendanceDay[] = []
+
+  let totalWorkedMins = 0
+  let totalBreakMins = 0
+  let presentDaysCount = 0
+  let requiredWorkingDays = 0
+  let absentDaysCount = 0
+  let leaveDaysCount = 0
+  let holidayDaysCount = 0
+  let sundayDaysCount = 0
+
+  // Iterate days of month up to today (or end of month if past month)
+  const lastDayOfMonth = new Date(y, m, 0).getDate()
+  for (let dayNum = 1; dayNum <= lastDayOfMonth; dayNum++) {
+    const curDateStr = `${selectedMonth}-${String(dayNum).padStart(2, '0')}`
+    if (curDateStr < addedDateIso) continue // Skip dates prior to employee added
+    if (curDateStr > todayIso) break // Skip future dates for daily attendance
+
+    const dateObj = new Date(curDateStr + 'T12:00:00')
+    const isSunday = dateObj.getDay() === 0
+    const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'short' })
+    const holidayName = holidaySet.get(curDateStr)
+    const isHoliday = Boolean(holidayName)
+
+    const matchingLeave = leavesList.find((lv) => {
+      const from = lv.from_date || ''
+      const to = lv.to_date || from
+      return from <= curDateStr && to >= curDateStr
+    })
+    const isLeave = Boolean(matchingLeave)
+
+    const att = attMap.get(curDateStr)
+    const hasPunch = Boolean(att?.check_in)
+    const past1159 = isDatePast1159(curDateStr, todayIso)
+    const isToday = curDateStr === todayIso
+    const isWorking = hasPunch && !att?.check_out && isToday && !past1159
+    const autoCheckOutIso = `${curDateStr}T12:30:00.000Z`
+    const effectiveCheckOut = att?.check_out || (hasPunch && past1159 ? autoCheckOutIso : null)
+
+    let status: MonthlyAttendanceDay['status'] = 'absent'
+    let statusLabel = 'Absent'
+
+    if (att?.check_in && (att?.check_out || past1159)) {
+      status = 'present'
+      statusLabel = 'Present'
+      presentDaysCount++
+    } else if (isWorking) {
+      status = 'working'
+      statusLabel = 'Working Live'
+      presentDaysCount++
+    } else if (hasPunch) {
+      status = 'present'
+      statusLabel = 'Present'
+      presentDaysCount++
+    } else if (isLeave) {
+      status = 'leave'
+      statusLabel = matchingLeave?.leave_type ? `${matchingLeave.leave_type} Leave` : 'Approved Leave'
+      leaveDaysCount++
+    } else if (isSunday) {
+      status = 'weekend'
+      statusLabel = 'Sunday Off'
+      sundayDaysCount++
+    } else if (isHoliday) {
+      status = 'holiday'
+      statusLabel = holidayName || 'Public Holiday'
+      holidayDaysCount++
+    } else {
+      status = 'absent'
+      statusLabel = 'Absent'
+      absentDaysCount++
+    }
+
+    if (!isSunday && !isLeave && !isHoliday) {
+      requiredWorkingDays++
+    }
+
+    const breakM = att?.break_minutes ?? (att?.total_break_seconds ? Math.round(att.total_break_seconds / 60) : 0)
+    let workedMins = 0
+    if (hasPunch) {
+      workedMins = computeWorkedMinutes(
+        { check_in: att?.check_in, check_out: effectiveCheckOut, break_minutes: breakM, total_break_seconds: att?.total_break_seconds },
+        curDateStr,
+        isToday && !past1159
+      )
+    }
+
+    totalWorkedMins += workedMins
+    totalBreakMins += breakM
+
+    const hoursStr = `${Math.floor(workedMins / 60)}h ${String(workedMins % 60).padStart(2, '0')}m`
+    const breakStr = breakM > 0
+      ? `${Math.floor(breakM / 60)}h ${String(breakM % 60).padStart(2, '0')}m`
+      : '0m'
+
+    days.push({
+      date: curDateStr,
+      dayOfWeek,
+      dayNumber: dayNum,
+      status,
+      statusLabel,
+      checkIn: formatTime(att?.check_in),
+      checkOut: isWorking ? 'Active / In Progress' : (effectiveCheckOut ? formatTime(effectiveCheckOut) : (hasPunch && past1159 ? '06:00 PM' : '—')),
+      rawCheckIn: att?.check_in,
+      rawCheckOut: effectiveCheckOut,
+      breakMinutes: breakM,
+      breakFormatted: breakStr,
+      workedMinutes: workedMins,
+      hours: hoursStr,
+      isSunday,
+      isHoliday,
+      isLeave,
+      leaveType: matchingLeave?.leave_type,
+      holidayName,
+      notes: isWorking ? 'Shift currently in progress' : undefined,
+    })
+  }
+
+  // Reverse so newest dates are first
+  days.reverse()
+
+  const totalHours = `${Math.floor(totalWorkedMins / 60)}h ${String(totalWorkedMins % 60).padStart(2, '0')}m`
+  const avgMins = presentDaysCount > 0 ? Math.floor(totalWorkedMins / presentDaysCount) : 0
+  const avgHours = `${Math.floor(avgMins / 60)}h ${String(avgMins % 60).padStart(2, '0')}m`
+  const targetMins = requiredWorkingDays * 480
+  const targetHours = `${Math.floor(targetMins / 60)}h 00m`
+  const diffMins = totalWorkedMins - targetMins
+  const differenceFormatted = diffMins >= 0
+    ? `+${Math.floor(diffMins / 60)}h ${String(diffMins % 60).padStart(2, '0')}m`
+    : `-${Math.floor(Math.abs(diffMins) / 60)}h ${String(Math.abs(diffMins) % 60).padStart(2, '0')}m`
+  const overtimeHours = diffMins > 0
+    ? `${Math.floor(diffMins / 60)}h ${String(diffMins % 60).padStart(2, '0')}m`
+    : '0h 00m'
+  const presentPercent = requiredWorkingDays > 0 ? Math.round((presentDaysCount / requiredWorkingDays) * 100) : 0
+
+  return {
+    employee: {
+      id: emp.id || '',
+      employeeId: emp.employee_id || emp.employeeId || '—',
+      name: emp.name || 'Unnamed Employee',
+      role: emp.designation || emp.role || 'Employee',
+      department: emp.department || 'Department Not Set',
+      joiningDate: emp.joining_date || emp.created_at,
+      created_at: emp.created_at,
+      avatar: emp.profile_photo_url || emp.avatar_url,
+      email: emp.email,
+      phone: emp.phone,
+    },
+    month: selectedMonth,
+    monthName: selectedMonthLabel,
+    availableMonths,
+    summary: {
+      month: selectedMonth,
+      monthName: selectedMonthLabel,
+      requiredWorkingDays,
+      presentDays: presentDaysCount,
+      absentDays: absentDaysCount,
+      leaveDays: leaveDaysCount,
+      holidayDays: holidayDaysCount,
+      sundayDays: sundayDaysCount,
+      presentPercent,
+      totalWorkedMinutes: totalWorkedMins,
+      totalHours,
+      averageHours: avgHours,
+      totalBreakMinutes: totalBreakMins,
+      overtimeHours,
+      targetHours,
+      differenceFormatted,
+    },
+    days,
   }
 }
 
@@ -1419,13 +1998,19 @@ export async function getAdminProfile(
   const effectiveEmail = authUser?.email || tokenEmail || ''
   const effectiveSub = authUser?.id || tokenSub || ''
 
-  // Build filter query for employees table
+  // Build filter query for employees table safely avoiding casting non-UUIDs to UUID
   const filters: string[] = []
   if (employeeIdOrDbId) {
-    filters.push(`id.eq.${employeeIdOrDbId}`, `employee_id.eq.${employeeIdOrDbId}`)
+    if (isUuid(employeeIdOrDbId)) {
+      filters.push(`id.eq.${employeeIdOrDbId}`)
+    }
+    filters.push(`employee_id.eq.${employeeIdOrDbId}`)
   }
   if (effectiveSub) {
-    filters.push(`id.eq.${effectiveSub}`, `employee_id.eq.${effectiveSub}`)
+    if (isUuid(effectiveSub)) {
+      filters.push(`id.eq.${effectiveSub}`)
+    }
+    filters.push(`employee_id.eq.${effectiveSub}`)
   }
   if (effectiveEmail) {
     filters.push(`email.eq.${effectiveEmail}`)
@@ -1507,6 +2092,7 @@ export interface UpdateEmployeePayload {
   phone?: string
   designation?: string
   department?: string
+  department_id?: string | null
   status?: string
   profile_photo_url?: string
 }
@@ -1608,6 +2194,18 @@ export async function updateEmployeeId(
   })
 }
 
+export async function deleteEmployee(
+  token: string,
+  targetEmployeeId: string,
+  password: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchSkyTrackApi(token, {
+    action: 'delete_employee',
+    targetEmployeeId,
+    password,
+  })
+}
+
 // --- LEAVE MANAGEMENT API INTEGRATION ---
 
 export interface SkyTrackLeave {
@@ -1674,7 +2272,7 @@ async function fetchSkyTrackApi<T = any>(token: string, payload: any): Promise<T
       }
 
       if (!response.ok || data.success === false) {
-        throw new Error(data?.error || data?.message || 'SkyTrack API request failed.')
+        throw new Error(data?.message || data?.error || 'SkyTrack API request failed.')
       }
 
       return data as T
@@ -1739,6 +2337,18 @@ export async function rejectLeave(
 ): Promise<{ success: boolean; leave?: SkyTrackLeave }> {
   return fetchSkyTrackApi(token, {
     action: 'reject_leave',
+    requestId,
+    managerComment,
+  })
+}
+
+export async function cancelLeave(
+  token: string,
+  requestId: string,
+  managerComment?: string
+): Promise<{ success: boolean; leave?: SkyTrackLeave; message?: string }> {
+  return fetchSkyTrackApi(token, {
+    action: 'cancel_leave',
     requestId,
     managerComment,
   })
