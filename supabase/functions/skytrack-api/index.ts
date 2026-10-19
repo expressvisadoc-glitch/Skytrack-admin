@@ -284,6 +284,14 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleAttendanceFeed(body);
     }
 
+    if (action === "admin_undo_checkout") {
+      return await handleAdminUndoCheckout(employee, body);
+    }
+
+    if (action === "admin_manual_attendance" || action === "admin_update_attendance") {
+      return await handleAdminManualAttendance(employee, body);
+    }
+
     // =========================================================
     // LEAVE
     // =========================================================
@@ -3961,6 +3969,224 @@ async function handleGetProfile(employee: any) {
       },
       500
     );
+  }
+}
+
+// =============================================================
+// ADMIN ATTENDANCE MANAGEMENT (UNDO CHECKOUT & MANUAL PUNCH)
+// =============================================================
+
+async function handleAdminUndoCheckout(employee: any, body: any): Promise<Response> {
+  try {
+    ensureAdmin(employee);
+
+    const targetEmployeeId = String(body.employeeId ?? body.employee_id ?? "").trim();
+    const date = String(body.date ?? body.attendance_date ?? getIndiaToday()).trim();
+
+    if (!targetEmployeeId) {
+      return json({
+        success: false,
+        error: "missing_employee_id",
+        message: "Employee ID is required."
+      }, 400);
+    }
+
+    let employeeDbId = targetEmployeeId;
+    const isReqUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetEmployeeId);
+    if (!isReqUuid) {
+      const { data: empRecord } = await adminClient
+        .from("employees")
+        .select("id")
+        .eq("employee_id", targetEmployeeId)
+        .maybeSingle();
+      if (empRecord?.id) {
+        employeeDbId = empRecord.id;
+      }
+    }
+
+    const { data: attendance, error: findError } = await adminClient
+      .from("attendance")
+      .select("*")
+      .eq("employee_id", employeeDbId)
+      .eq("attendance_date", date)
+      .maybeSingle();
+
+    if (findError) {
+      return json({
+        success: false,
+        error: "database_error",
+        message: findError.message
+      }, 500);
+    }
+
+    if (!attendance) {
+      return json({
+        success: false,
+        error: "attendance_not_found",
+        message: "No attendance record found for this employee on the specified date."
+      }, 404);
+    }
+
+    // Restore status based on check_in
+    let restoredStatus = attendance.status;
+    if (attendance.check_in) {
+      if (restoredStatus === "absent" || !restoredStatus) {
+        restoredStatus = "present";
+      }
+    }
+
+    const { data: updated, error: updateError } = await adminClient
+      .from("attendance")
+      .update({
+        check_out: null,
+        worked_minutes: null,
+        status: restoredStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", attendance.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      return json({
+        success: false,
+        error: "update_failed",
+        message: updateError.message
+      }, 500);
+    }
+
+    return json({
+      success: true,
+      message: "Check-out undone successfully. Employee is now marked in progress.",
+      attendance: updated
+    });
+  } catch (error) {
+    console.error("handleAdminUndoCheckout error:", error);
+    return json({
+      success: false,
+      error: "server_error",
+      message: error instanceof Error ? error.message : "Failed to undo check-out."
+    }, 500);
+  }
+}
+
+async function handleAdminManualAttendance(employee: any, body: any): Promise<Response> {
+  try {
+    ensureAdmin(employee);
+
+    const targetEmployeeId = String(body.employeeId ?? body.employee_id ?? "").trim();
+    const date = String(body.date ?? body.attendance_date ?? getIndiaToday()).trim();
+    const rawCheckIn = body.checkIn ?? body.check_in;
+    const rawCheckOut = body.checkOut ?? body.check_out;
+
+    if (!targetEmployeeId) {
+      return json({
+        success: false,
+        error: "missing_employee_id",
+        message: "Employee ID is required."
+      }, 400);
+    }
+
+    let employeeDbId = targetEmployeeId;
+    const isReqUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetEmployeeId);
+    if (!isReqUuid) {
+      const { data: empRecord } = await adminClient
+        .from("employees")
+        .select("id")
+        .eq("employee_id", targetEmployeeId)
+        .maybeSingle();
+      if (empRecord?.id) {
+        employeeDbId = empRecord.id;
+      }
+    }
+
+    const { data: existing } = await adminClient
+      .from("attendance")
+      .select("*")
+      .eq("employee_id", employeeDbId)
+      .eq("attendance_date", date)
+      .maybeSingle();
+
+    const finalCheckIn = rawCheckIn !== undefined ? rawCheckIn : existing?.check_in ?? null;
+    const finalCheckOut = rawCheckOut !== undefined ? rawCheckOut : existing?.check_out ?? null;
+
+    let workedMinutes: number | null = null;
+    if (finalCheckIn && finalCheckOut) {
+      const breakSec = existing?.total_break_seconds ?? (existing?.break_minutes ? existing.break_minutes * 60 : 0);
+      const inMs = new Date(finalCheckIn).getTime();
+      const outMs = new Date(finalCheckOut).getTime();
+      if (outMs > inMs) {
+        workedMinutes = Math.max(0, Math.floor((outMs - inMs) / 60000) - Math.round(breakSec / 60));
+      }
+    }
+
+    let status = body.status || existing?.status || "present";
+    if (finalCheckIn) {
+      const d = new Date(finalCheckIn);
+      const istHour = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+      const istMin = (d.getUTCMinutes() + 30) % 60;
+      if (istHour > 9 || (istHour === 9 && istMin > 15)) {
+        status = "late";
+      } else if (status === "absent") {
+        status = "present";
+      }
+    }
+
+    let resultRecord: any;
+    if (existing) {
+      const { data: updated, error: updateError } = await adminClient
+        .from("attendance")
+        .update({
+          check_in: finalCheckIn,
+          check_out: finalCheckOut,
+          worked_minutes: workedMinutes,
+          status,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
+
+      if (updateError) {
+        return json({ success: false, error: "update_failed", message: updateError.message }, 500);
+      }
+      resultRecord = updated;
+    } else {
+      const { data: inserted, error: insertError } = await adminClient
+        .from("attendance")
+        .insert({
+          employee_id: employeeDbId,
+          attendance_date: date,
+          check_in: finalCheckIn,
+          check_out: finalCheckOut,
+          worked_minutes: workedMinutes,
+          status: status || "present",
+          break_minutes: 0,
+          total_break_seconds: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        return json({ success: false, error: "insert_failed", message: insertError.message }, 500);
+      }
+      resultRecord = inserted;
+    }
+
+    return json({
+      success: true,
+      message: "Attendance recorded successfully.",
+      attendance: resultRecord
+    });
+  } catch (error) {
+    console.error("handleAdminManualAttendance error:", error);
+    return json({
+      success: false,
+      error: "server_error",
+      message: error instanceof Error ? error.message : "Failed to record attendance."
+    }, 500);
   }
 }
 

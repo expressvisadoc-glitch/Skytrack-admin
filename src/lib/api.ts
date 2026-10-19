@@ -336,6 +336,42 @@ async function patchSupabaseRest<T = any>(
   return text ? JSON.parse(text) : ({} as T)
 }
 
+/**
+ * Performs authenticated REST POST queries against Supabase
+ */
+async function postSupabaseRest<T = any>(
+  path: string,
+  body: any,
+  token?: string
+): Promise<T> {
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_ANON_KEY,
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation',
+  }
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(`${SUPABASE_REST_URL}/${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('SESSION_EXPIRED')
+    }
+    const errText = await response.text()
+    throw new Error(`Supabase query failed: ${errText || response.statusText}`)
+  }
+
+  const text = await response.text()
+  return text ? JSON.parse(text) : ({} as T)
+}
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function isUuid(val?: string | null): boolean {
@@ -374,7 +410,7 @@ export function isDatePast1159(dateStr: string, todayIso: string): boolean {
 /**
  * Formats an ISO date or timestamp into readable 12-hour time string in IST (e.g. 06:00 PM)
  */
-function formatTime(isoStr?: string | null): string {
+export function formatTime(isoStr?: string | null): string {
   if (!isoStr) return '—'
   try {
     const d = new Date(isoStr)
@@ -393,7 +429,7 @@ function formatTime(isoStr?: string | null): string {
 /**
  * Formats a Date object or date string (e.g. "2026-09-21") into "21 Sep 2026"
  */
-function formatDate(dateStr?: string | null): string {
+export function formatDate(dateStr?: string | null): string {
   if (!dateStr) return ''
   try {
     const d = new Date(dateStr)
@@ -1068,6 +1104,12 @@ export interface FullAttendanceRecord {
   created_at?: string
   email?: string
   phone?: string
+  rawDate: string
+  rawCheckIn?: string | null
+  rawCheckOut?: string | null
+  attendanceDbId?: string | null
+  hasCheckedIn: boolean
+  hasCheckedOut: boolean
 }
 
 /**
@@ -1273,6 +1315,12 @@ export async function getDailyAttendance(
       created_at: emp.created_at,
       email: emp.email,
       phone: emp.phone,
+      rawDate: targetDate,
+      rawCheckIn: attRecord?.check_in ?? null,
+      rawCheckOut: attRecord?.check_out ?? null,
+      attendanceDbId: attRecord?.id ?? null,
+      hasCheckedIn: Boolean(attRecord?.check_in),
+      hasCheckedOut: Boolean(attRecord?.check_out),
     }
   })
 
@@ -2544,5 +2592,218 @@ export async function seedPublicHolidays(token: string): Promise<{ success: bool
   return fetchSkyTrackApi(token, {
     action: 'seed_public_holidays',
   })
+}
+
+/**
+ * Converts a date string ('YYYY-MM-DD') and time string ('HH:mm') to an ISO-8601 string in Asia/Kolkata (+05:30)
+ */
+export function timeToIso(dateStr: string, timeStr: string): string {
+  if (!dateStr || !timeStr) return ''
+  const trimmedTime = timeStr.trim()
+  const formattedTime = trimmedTime.length === 5 ? `${trimmedTime}:00` : trimmedTime
+  return `${dateStr}T${formattedTime}+05:30`
+}
+
+/**
+ * Converts an ISO date string to 'HH:mm' formatted in Asia/Kolkata for <input type="time">
+ */
+export function isoToTimeInput(isoStr?: string | null): string {
+  if (!isoStr) return ''
+  try {
+    const d = new Date(isoStr)
+    if (isNaN(d.getTime())) return ''
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+    }).formatToParts(d)
+    const h = parts.find((p) => p.type === 'hour')?.value || '00'
+    const m = parts.find((p) => p.type === 'minute')?.value || '00'
+    return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Returns the current time in Asia/Kolkata formatted as 'HH:mm' for <input type="time">
+ */
+export function getCurrentTimeInput(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+    }).formatToParts(new Date())
+    const h = parts.find((p) => p.type === 'hour')?.value || '00'
+    const m = parts.find((p) => p.type === 'minute')?.value || '00'
+    return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`
+  } catch {
+    const d = new Date()
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+}
+
+/**
+ * Undoes an employee's check out, clearing check_out and restoring active session status
+ */
+export async function adminUndoCheckOut(
+  token: string,
+  params: {
+    employeeDbId: string
+    date: string // 'YYYY-MM-DD'
+    attendanceDbId?: string | null
+  }
+): Promise<{ success: boolean; message?: string }> {
+  // 1. Attempt edge function RPC
+  try {
+    const res = await fetchSkyTrackApi(token, {
+      action: 'admin_undo_checkout',
+      employeeId: params.employeeDbId,
+      date: params.date,
+    })
+    if (res && res.success) {
+      return res
+    }
+  } catch (err: any) {
+    console.warn('Edge function admin_undo_checkout fallback to Supabase REST:', err)
+  }
+
+  // 2. Fallback to direct Supabase REST PATCH
+  try {
+    const filter = params.attendanceDbId
+      ? `attendance?id=eq.${params.attendanceDbId}`
+      : `attendance?employee_id=eq.${params.employeeDbId}&attendance_date=eq.${params.date}`
+
+    await patchSupabaseRest(
+      filter,
+      {
+        check_out: null,
+        worked_minutes: null,
+        updated_at: new Date().toISOString(),
+      },
+      token
+    )
+    return {
+      success: true,
+      message: 'Check out undone successfully.',
+    }
+  } catch (err: any) {
+    console.error('Failed to undo check out via Supabase REST:', err)
+    throw new Error(err?.message || 'Unable to undo check out.')
+  }
+}
+
+/**
+ * Manually sets or updates an employee's Check In and/or Check Out time
+ */
+export async function adminSetAttendance(
+  token: string,
+  params: {
+    employeeDbId: string
+    date: string // 'YYYY-MM-DD'
+    checkIn?: string | null // ISO timestamp or null
+    checkOut?: string | null // ISO timestamp or null
+    attendanceDbId?: string | null
+  }
+): Promise<{ success: boolean; message?: string }> {
+  // 1. Attempt edge function RPC
+  try {
+    const res = await fetchSkyTrackApi(token, {
+      action: 'admin_manual_attendance',
+      employeeId: params.employeeDbId,
+      date: params.date,
+      checkIn: params.checkIn,
+      checkOut: params.checkOut,
+    })
+    if (res && res.success) {
+      return res
+    }
+  } catch (err: any) {
+    console.warn('Edge function admin_manual_attendance fallback to Supabase REST:', err)
+  }
+
+  // 2. Fallback to direct Supabase REST
+  try {
+    const existingList = await fetchSupabaseRest<any[]>(
+      `attendance?employee_id=eq.${params.employeeDbId}&attendance_date=eq.${params.date}&select=*`,
+      token
+    )
+    const existing = existingList?.[0]
+
+    const finalCheckIn = params.checkIn !== undefined ? params.checkIn : existing?.check_in ?? null
+    const finalCheckOut = params.checkOut !== undefined ? params.checkOut : existing?.check_out ?? null
+
+    // Determine status
+    let status = existing?.status || 'present'
+    if (finalCheckIn) {
+      const d = new Date(finalCheckIn)
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        hour12: false,
+        hour: 'numeric',
+        minute: 'numeric',
+      }).formatToParts(d)
+      const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0)
+      const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0)
+      if (h > 9 || (h === 9 && m > 15)) {
+        status = 'late'
+      } else if (status === 'absent') {
+        status = 'present'
+      }
+    }
+
+    // Determine worked minutes if both exist
+    let workedMinutes: number | null = null
+    if (finalCheckIn && finalCheckOut) {
+      const breakSec = existing?.total_break_seconds ?? (existing?.break_minutes ? existing.break_minutes * 60 : 0)
+      const inMs = new Date(finalCheckIn).getTime()
+      const outMs = new Date(finalCheckOut).getTime()
+      if (outMs > inMs) {
+        workedMinutes = Math.max(0, Math.floor((outMs - inMs) / 60000) - Math.round(breakSec / 60))
+      }
+    }
+
+    if (existing) {
+      await patchSupabaseRest(
+        `attendance?id=eq.${existing.id}`,
+        {
+          check_in: finalCheckIn,
+          check_out: finalCheckOut,
+          worked_minutes: workedMinutes,
+          status,
+          updated_at: new Date().toISOString(),
+        },
+        token
+      )
+    } else {
+      await postSupabaseRest(
+        'attendance',
+        {
+          employee_id: params.employeeDbId,
+          attendance_date: params.date,
+          check_in: finalCheckIn,
+          check_out: finalCheckOut,
+          worked_minutes: workedMinutes,
+          status: status || 'present',
+          break_minutes: 0,
+          total_break_seconds: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        token
+      )
+    }
+
+    return {
+      success: true,
+      message: 'Attendance recorded successfully.',
+    }
+  } catch (err: any) {
+    console.error('Failed to set attendance via Supabase REST:', err)
+    throw new Error(err?.message || 'Unable to update attendance.')
+  }
 }
 
