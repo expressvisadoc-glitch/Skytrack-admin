@@ -446,25 +446,70 @@ async function handleLogin(body: any) {
     );
   }
 
-  const {
-    data: employee,
-    error: employeeError
-  } = await adminClient
-    .from("employees")
-    .select(`
-      id,
-      employee_id,
-      name,
-      email,
-      role,
-      status,
-      auth_user_id,
-      created_at,
-      joining_date,
-      profile_photo_url
-    `)
-    .eq("employee_id", employeeId)
-    .maybeSingle();
+  // Find employee: safely check by email if it contains '@', else by employee_id then email
+  let employee: any = null;
+  let employeeError: any = null;
+
+  if (employeeId.includes("@")) {
+    const res = await adminClient
+      .from("employees")
+      .select(`
+        id,
+        employee_id,
+        name,
+        email,
+        role,
+        status,
+        auth_user_id,
+        created_at,
+        joining_date,
+        profile_photo_url
+      `)
+      .ilike("email", employeeId)
+      .maybeSingle();
+    employee = res.data;
+    employeeError = res.error;
+  } else {
+    const res = await adminClient
+      .from("employees")
+      .select(`
+        id,
+        employee_id,
+        name,
+        email,
+        role,
+        status,
+        auth_user_id,
+        created_at,
+        joining_date,
+        profile_photo_url
+      `)
+      .ilike("employee_id", employeeId)
+      .maybeSingle();
+    employee = res.data;
+    employeeError = res.error;
+
+    if (!employee && !employeeError) {
+      const emailRes = await adminClient
+        .from("employees")
+        .select(`
+          id,
+          employee_id,
+          name,
+          email,
+          role,
+          status,
+          auth_user_id,
+          created_at,
+          joining_date,
+          profile_photo_url
+        `)
+        .ilike("email", employeeId)
+        .maybeSingle();
+      employee = emailRes.data;
+      employeeError = emailRes.error;
+    }
+  }
 
   if (employeeError) {
     console.error(
@@ -506,38 +551,119 @@ async function handleLogin(body: any) {
     );
   }
 
-  if (
-    !employee.email ||
-    !employee.auth_user_id
-  ) {
+  let targetEmail = employee.email ? employee.email.trim().toLowerCase() : null;
+  if (!targetEmail && employee.employee_id) {
+    targetEmail = `${employee.employee_id.trim().toLowerCase()}@skytrack.internal`;
+    try {
+      await adminClient.from("employees").update({ email: targetEmail }).eq("id", employee.id);
+      employee.email = targetEmail;
+    } catch (e) {
+      console.warn("Could not set fallback email on employee:", e);
+    }
+  }
+
+  if (!targetEmail) {
     return json(
       {
         success: false,
         error: "account_not_configured",
         message:
-          "Employee authentication is not configured."
+          "Employee authentication is not configured (missing email)."
       },
       500
     );
   }
 
-  const {
+  let {
     data: authData,
     error: authError
   } =
     await authClient.auth.signInWithPassword({
-      email: employee.email,
+      email: targetEmail,
       password
     });
 
+  // Self-healing 1: Auto-confirm email if required by Supabase Auth project
+  if (authError?.message?.toLowerCase().includes("email not confirmed")) {
+    console.log("Auto-confirming email for", targetEmail);
+    try {
+      let uidToConfirm = employee.auth_user_id;
+      if (!uidToConfirm) {
+        const { data: userList } = await adminClient.auth.admin.listUsers();
+        const found = userList?.users?.find(
+          (u: any) => u.email?.toLowerCase() === targetEmail
+        );
+        if (found) {
+          uidToConfirm = found.id;
+        }
+      }
+      if (uidToConfirm) {
+        await adminClient.auth.admin.updateUserById(uidToConfirm, { email_confirm: true });
+        const retry = await authClient.auth.signInWithPassword({
+          email: targetEmail,
+          password
+        });
+        authData = retry.data;
+        authError = retry.error;
+      }
+    } catch (e) {
+      console.warn("Could not auto-confirm email:", e);
+    }
+  }
+
+  // Self-healing 2: If auth user in auth.users has a different email, try that email
+  if (authError && employee.auth_user_id) {
+    try {
+      const { data: authUserObj } = await adminClient.auth.admin.getUserById(employee.auth_user_id);
+      const actualAuthEmail = authUserObj?.user?.email?.trim().toLowerCase();
+      if (actualAuthEmail && actualAuthEmail !== targetEmail) {
+        console.log("Retrying login with actual auth email:", actualAuthEmail);
+        const retry = await authClient.auth.signInWithPassword({
+          email: actualAuthEmail,
+          password
+        });
+        if (retry.data?.session) {
+          authData = retry.data;
+          authError = null;
+          await adminClient.from("employees").update({ email: actualAuthEmail }).eq("id", employee.id);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not check auth user by id:", e);
+    }
+  }
+
+  // Self-healing 3: Try internal fallback email if different
+  if (authError && employee.employee_id) {
+    const internalFallback = `${employee.employee_id.trim().toLowerCase()}@skytrack.internal`;
+    if (targetEmail !== internalFallback) {
+      try {
+        const retry = await authClient.auth.signInWithPassword({
+          email: internalFallback,
+          password
+        });
+        if (retry.data?.session) {
+          authData = retry.data;
+          authError = null;
+          await adminClient.from("employees").update({ email: internalFallback }).eq("id", employee.id);
+        }
+      } catch (e) {
+        console.warn("Could not retry with internal fallback:", e);
+      }
+    }
+  }
+
   if (
     authError ||
-    !authData.session ||
-    !authData.user
+    !authData?.session ||
+    !authData?.user
   ) {
     console.error(
-      "Auth error:",
-      authError
+      "Auth error for",
+      employee.employee_id,
+      targetEmail,
+      ":",
+      authError?.message || authError
     );
 
     return json(
@@ -551,25 +677,23 @@ async function handleLogin(body: any) {
     );
   }
 
+  // Self-healing 4: Sync auth_user_id if not set or mismatched
   if (
     authData.user.id !==
     employee.auth_user_id
   ) {
-    console.error(
-      "Auth user mismatch:",
-      authData.user.id,
-      employee.auth_user_id
+    console.log(
+      "Syncing auth_user_id for employee",
+      employee.id,
+      "to",
+      authData.user.id
     );
 
-    return json(
-      {
-        success: false,
-        error: "account_mismatch",
-        message:
-          "Employee authentication configuration is invalid."
-      },
-      500
-    );
+    await adminClient
+      .from("employees")
+      .update({ auth_user_id: authData.user.id })
+      .eq("id", employee.id);
+    employee.auth_user_id = authData.user.id;
   }
 
   return json({
@@ -3813,12 +3937,40 @@ async function handleSuperAdminChangeEmployeePassword(
       }, 400);
     }
 
-    // 2. Fetch target employee
-    const { data: targetEmployee, error: targetError } = await adminClient
-      .from("employees")
-      .select("id, name, employee_id, email, auth_user_id, role")
-      .eq("id", targetEmployeeId)
-      .maybeSingle();
+    // 2. Fetch target employee (safely checks UUID id, employee_id, and email without throwing PostgREST uuid format errors)
+    let targetEmployee: any = null;
+    let targetError: any = null;
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetEmployeeId);
+    if (isUuid) {
+      const res = await adminClient
+        .from("employees")
+        .select("id, name, employee_id, email, auth_user_id, role")
+        .eq("id", targetEmployeeId)
+        .maybeSingle();
+      targetEmployee = res.data;
+      targetError = res.error;
+    }
+
+    if (!targetEmployee && !targetError) {
+      const res = await adminClient
+        .from("employees")
+        .select("id, name, employee_id, email, auth_user_id, role")
+        .ilike("employee_id", targetEmployeeId)
+        .maybeSingle();
+      targetEmployee = res.data;
+      targetError = res.error;
+    }
+
+    if (!targetEmployee && !targetError && targetEmployeeId.includes("@")) {
+      const res = await adminClient
+        .from("employees")
+        .select("id, name, employee_id, email, auth_user_id, role")
+        .ilike("email", targetEmployeeId)
+        .maybeSingle();
+      targetEmployee = res.data;
+      targetError = res.error;
+    }
 
     if (targetError) {
       return json({
@@ -3847,7 +3999,7 @@ async function handleSuperAdminChangeEmployeePassword(
     }
 
     const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
-      email: adminEmail,
+      email: adminEmail.trim().toLowerCase(),
       password: adminPassword
     });
 
@@ -3860,105 +4012,109 @@ async function handleSuperAdminChangeEmployeePassword(
     }
 
     // 4. Update the target employee's password in Supabase Auth
+    let finalEmail = String(targetEmployee.email ?? "").trim().toLowerCase();
+    if (!finalEmail && targetEmployee.employee_id) {
+      finalEmail = `${targetEmployee.employee_id.trim().toLowerCase()}@skytrack.internal`;
+    }
+
     let authUserId = targetEmployee.auth_user_id;
+    let authUserRecord: any = null;
 
     if (authUserId) {
+      try {
+        const { data: existingUser } = await adminClient.auth.admin.getUserById(authUserId);
+        if (existingUser?.user) {
+          authUserRecord = existingUser.user;
+        }
+      } catch {
+        authUserRecord = null;
+      }
+    }
+
+    // If auth_user_id was missing or not found in auth.users, search by email
+    if (!authUserRecord && finalEmail) {
+      try {
+        const { data: userList } = await adminClient.auth.admin.listUsers();
+        const existingAuth = userList?.users?.find(
+          (u: any) => u.email?.toLowerCase() === finalEmail
+        );
+        if (existingAuth) {
+          authUserRecord = existingAuth;
+          authUserId = existingAuth.id;
+        }
+      } catch (e) {
+        console.warn("Could not search auth users by email:", e);
+      }
+    }
+
+    if (authUserRecord && authUserId) {
+      const updatePayload: any = {
+        password: newPassword,
+        email_confirm: true
+      };
+      if (finalEmail) {
+        updatePayload.email = finalEmail;
+      }
+
       const { error: updateError } = await adminClient.auth.admin.updateUserById(
         authUserId,
-        { password: newPassword }
+        updatePayload
       );
 
       if (updateError) {
-        console.warn("Error updating user by id, falling back to email lookup:", updateError);
-        const { data: userList } = await adminClient.auth.admin.listUsers();
-        const existingAuth = userList?.users?.find(
-          (u: any) => u.email?.toLowerCase() === targetEmployee.email?.toLowerCase()
+        console.warn("Error updating user with email, trying password only:", updateError);
+        const { error: retryError } = await adminClient.auth.admin.updateUserById(
+          authUserId,
+          {
+            password: newPassword,
+            email_confirm: true
+          }
         );
 
-        if (existingAuth) {
-          const { error: retryError } = await adminClient.auth.admin.updateUserById(
-            existingAuth.id,
-            { password: newPassword }
-          );
-          if (retryError) {
-            return json({
-              success: false,
-              error: "password_update_failed",
-              message: retryError.message
-            }, 500);
-          }
-          if (existingAuth.id !== targetEmployee.auth_user_id) {
-            await adminClient
-              .from("employees")
-              .update({ auth_user_id: existingAuth.id })
-              .eq("id", targetEmployee.id);
-          }
-        } else {
+        if (retryError) {
           return json({
             success: false,
             error: "password_update_failed",
-            message: updateError.message
+            message: retryError.message
           }, 500);
         }
       }
+
+      await adminClient
+        .from("employees")
+        .update({
+          auth_user_id: authUserId,
+          email: finalEmail || targetEmployee.email
+        })
+        .eq("id", targetEmployee.id);
     } else {
-      // If auth_user_id was null on employee record
-      if (!targetEmployee.email) {
+      // Create new auth user
+      const { data: newAuth, error: createError } = await adminClient.auth.admin.createUser({
+        email: finalEmail,
+        password: newPassword,
+        email_confirm: true
+      });
+
+      if (createError || !newAuth?.user) {
         return json({
           success: false,
-          error: "missing_employee_email",
-          message: "Employee does not have an email address configured."
-        }, 400);
+          error: "auth_user_creation_failed",
+          message: createError?.message || "Failed to create authentication user."
+        }, 500);
       }
 
-      // Check if auth user exists with this email
-      const { data: userList } = await adminClient.auth.admin.listUsers();
-      const existingAuth = userList?.users?.find(
-        (u: any) => u.email?.toLowerCase() === targetEmployee.email.toLowerCase()
-      );
-
-      if (existingAuth) {
-        const { error: updateError } = await adminClient.auth.admin.updateUserById(
-          existingAuth.id,
-          { password: newPassword }
-        );
-        if (updateError) {
-          return json({
-            success: false,
-            error: "password_update_failed",
-            message: updateError.message
-          }, 500);
-        }
-        await adminClient
-          .from("employees")
-          .update({ auth_user_id: existingAuth.id })
-          .eq("id", targetEmployee.id);
-      } else {
-        // Create new auth user
-        const { data: newAuth, error: createError } = await adminClient.auth.admin.createUser({
-          email: targetEmployee.email,
-          password: newPassword,
-          email_confirm: true
-        });
-
-        if (createError || !newAuth?.user) {
-          return json({
-            success: false,
-            error: "auth_user_creation_failed",
-            message: createError?.message || "Failed to create authentication user."
-          }, 500);
-        }
-
-        await adminClient
-          .from("employees")
-          .update({ auth_user_id: newAuth.user.id })
-          .eq("id", targetEmployee.id);
-      }
+      await adminClient
+        .from("employees")
+        .update({
+          auth_user_id: newAuth.user.id,
+          email: finalEmail
+        })
+        .eq("id", targetEmployee.id);
     }
 
     return json({
       success: true,
-      message: `Password for ${targetEmployee.name} (${targetEmployee.employee_id || targetEmployee.id}) has been updated successfully.`
+      message: `Password for ${targetEmployee.name || targetEmployee.employee_id} has been updated successfully.`
     });
 
   } catch (error) {
