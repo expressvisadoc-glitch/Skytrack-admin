@@ -4,6 +4,7 @@ import {
   getEmployeeHistory,
   updateEmployeeDetails,
   deleteEmployee,
+  superAdminChangeEmployeePassword,
   type EmployeeDirectoryItem,
   type AttendanceHistoryItem,
   type LeaveHistoryItem,
@@ -106,6 +107,26 @@ export function EmployeeDetails({
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleteSuccessToast, setDeleteSuccessToast] = useState<string | null>(null)
+
+  // Super Admin Change Password 2FA Modal State
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
+  const [passwordStep, setPasswordStep] = useState<1 | 2>(1)
+  const [newEmployeePassword, setNewEmployeePassword] = useState('')
+  const [confirmEmployeePassword, setConfirmEmployeePassword] = useState('')
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [superAdmin2faPassword, setSuperAdmin2faPassword] = useState('')
+  const [showSuperAdmin2faPassword, setShowSuperAdmin2faPassword] = useState(false)
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordSuccessToast, setPasswordSuccessToast] = useState<string | null>(null)
+
+  const isSuperAdmin = Boolean(
+    currentAdmin &&
+      ((currentAdmin.role && currentAdmin.role.toLowerCase() === 'super_admin') ||
+        (currentAdmin as any)?.user_role === 'super_admin' ||
+        (currentAdmin.designation && currentAdmin.designation.toLowerCase().includes('super admin')))
+  )
 
   const isSelf = Boolean(
     currentAdmin &&
@@ -329,6 +350,70 @@ export function EmployeeDetails({
       setDeleteError(err.message || 'The password is wrong.')
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  const handleProceedTo2fa = (e: React.FormEvent) => {
+    e.preventDefault()
+    setPasswordError(null)
+
+    if (!newEmployeePassword) {
+      setPasswordError('Please enter a new password.')
+      return
+    }
+
+    if (newEmployeePassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters.')
+      return
+    }
+
+    if (newEmployeePassword !== confirmEmployeePassword) {
+      setPasswordError('New password and confirmation do not match.')
+      return
+    }
+
+    setPasswordStep(2)
+  }
+
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!token || !currentEmp?.id) return
+
+    if (!superAdmin2faPassword.trim()) {
+      setPasswordError('Please enter your Super Admin password.')
+      return
+    }
+
+    setIsChangingPassword(true)
+    setPasswordError(null)
+
+    try {
+      const res = await superAdminChangeEmployeePassword(
+        token,
+        currentEmp.id,
+        newEmployeePassword.trim(),
+        superAdmin2faPassword.trim()
+      )
+
+      setIsPasswordModalOpen(false)
+      setPasswordSuccessToast(res.message || `Password for ${empName} has been updated successfully.`)
+      setNewEmployeePassword('')
+      setConfirmEmployeePassword('')
+      setSuperAdmin2faPassword('')
+      setPasswordStep(1)
+
+      setTimeout(() => {
+        setPasswordSuccessToast(null)
+      }, 4500)
+    } catch (err: any) {
+      console.error('Change employee password error:', err)
+      if (err.message === 'SESSION_EXPIRED') {
+        logout()
+        return
+      }
+      setPasswordError(err.message || 'The password is wrong.')
+    } finally {
+      setIsChangingPassword(false)
     }
   }
 
@@ -806,6 +891,48 @@ export function EmployeeDetails({
                     </div>
                   )}
                 </div>
+
+                {/* --- Security & Credentials Section (Super Admin Only) --- */}
+                {isSuperAdmin && (
+                  <div className="pt-4 mt-2 border-t border-slate-100 flex flex-col gap-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-purple-600 text-lg">lock_reset</span>
+                        <h4 className="text-sm font-bold text-slate-800">Security & Credentials</h4>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-200">
+                        Super Admin Privilege
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-50/70 via-slate-50 to-white border border-purple-100/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <span>Employee Login Password</span>
+                          <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+                        </span>
+                        <span className="text-[11px] text-slate-500 mt-0.5">
+                          Change or reset the login password for <span className="font-semibold text-slate-700">{empName}</span>. Protected by Super Admin 2FA.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsPasswordModalOpen(true)
+                          setPasswordStep(1)
+                          setNewEmployeePassword('')
+                          setConfirmEmployeePassword('')
+                          setSuperAdmin2faPassword('')
+                          setPasswordError(null)
+                        }}
+                        className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-sm shadow-purple-600/20 hover:shadow-md hover:shadow-purple-600/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[17px]">key</span>
+                        <span>Change Password</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Modal Actions */}
                 <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100 mt-2">
@@ -1492,6 +1619,245 @@ export function EmployeeDetails({
             <div className="flex flex-col">
               <span className="text-xs font-bold text-white">Employee Deleted</span>
               <span className="text-[11px] text-slate-300">{deleteSuccessToast}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Super Admin Change Password 2FA Modal */}
+        {isPasswordModalOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl p-6 md:p-8 max-w-md w-full flex flex-col gap-5 animate-in fade-in zoom-in-95 my-8">
+
+              {/* Modal Header */}
+              <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-purple-50 border border-purple-100 text-purple-600 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[22px]">
+                      {passwordStep === 1 ? 'key' : 'verified_user'}
+                    </span>
+                  </div>
+                  <div className="flex flex-col">
+                    <h3 className="text-base font-bold text-slate-900">
+                      {passwordStep === 1 ? 'Change Employee Password' : 'Super Admin 2FA Verification'}
+                    </h3>
+                    <span className="text-[11px] font-semibold text-purple-600 uppercase tracking-wider">
+                      {passwordStep === 1 ? 'Step 1 of 2: New Password' : 'Step 2 of 2: Security 2FA'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPasswordModalOpen(false)}
+                  className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-sm">close</span>
+                </button>
+              </div>
+
+              {/* Target Employee Summary Card */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 font-bold text-xs flex items-center justify-center">
+                    {empName.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-900">{empName}</span>
+                    <span className="text-[11px] text-slate-500 font-mono">{empCode} • {empDepartment}</span>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-100">
+                  {currentEmp?.role || 'Employee'}
+                </span>
+              </div>
+
+              {passwordError && (
+                <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                  <span className="material-symbols-outlined text-[18px] shrink-0">error</span>
+                  <span>{passwordError}</span>
+                </div>
+              )}
+
+              {passwordStep === 1 ? (
+                /* Step 1: New Password Entry */
+                <form onSubmit={handleProceedTo2fa} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      New Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        required
+                        autoFocus
+                        minLength={6}
+                        value={newEmployeePassword}
+                        onChange={(e) => {
+                          setNewEmployeePassword(e.target.value)
+                          if (passwordError) setPasswordError(null)
+                        }}
+                        placeholder="Minimum 6 characters"
+                        className="w-full h-11 pl-3.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/10 transition-all font-medium font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {showNewPassword ? 'visibility_off' : 'visibility'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Confirm New Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={confirmEmployeePassword}
+                        onChange={(e) => {
+                          setConfirmEmployeePassword(e.target.value)
+                          if (passwordError) setPasswordError(null)
+                        }}
+                        placeholder="Re-enter new password"
+                        className="w-full h-11 pl-3.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/10 transition-all font-medium font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {showConfirmPassword ? 'visibility_off' : 'visibility'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    The employee will immediately use this new password to sign into the SkyTrack mobile app and web portal.
+                  </p>
+
+                  <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setIsPasswordModalOpen(false)}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!newEmployeePassword || newEmployeePassword.length < 6 || newEmployeePassword !== confirmEmployeePassword}
+                      className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm shadow-purple-600/20 transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <span>Continue to 2FA</span>
+                      <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* Step 2: Super Admin 2FA Password Verification */
+                <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-4">
+                  <div className="p-3.5 rounded-2xl bg-purple-50/70 border border-purple-200/80 flex flex-col gap-1.5">
+                    <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px]">security</span>
+                      Super Admin Authorization Required
+                    </span>
+                    <p className="text-[11px] text-purple-800/90 leading-relaxed">
+                      Please enter your Super Admin password (<span className="font-semibold text-purple-950">{currentAdmin?.name || currentAdmin?.email || 'Logged-in Super Admin'}</span>) to authorize updating the password for <span className="font-semibold text-purple-950">{empName}</span>.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Your Super Admin Password *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showSuperAdmin2faPassword ? 'text' : 'password'}
+                        required
+                        autoFocus
+                        value={superAdmin2faPassword}
+                        onChange={(e) => {
+                          setSuperAdmin2faPassword(e.target.value)
+                          if (passwordError) setPasswordError(null)
+                        }}
+                        placeholder="Enter your Super Admin password"
+                        className="w-full h-11 pl-3.5 pr-10 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/10 transition-all font-medium font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSuperAdmin2faPassword(!showSuperAdmin2faPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {showSuperAdmin2faPassword ? 'visibility_off' : 'visibility'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPasswordStep(1)
+                        setPasswordError(null)
+                        setSuperAdmin2faPassword('')
+                      }}
+                      disabled={isChangingPassword}
+                      className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsPasswordModalOpen(false)}
+                      disabled={isChangingPassword}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isChangingPassword || !superAdmin2faPassword.trim()}
+                      className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-sm shadow-purple-600/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      {isChangingPassword ? (
+                        <>
+                          <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                          <span>Updating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined text-[16px]">lock_reset</span>
+                          <span>Verify & Save</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+            </div>
+          </div>
+        )}
+
+        {/* Password Success Toast */}
+        {passwordSuccessToast && (
+          <div className="fixed bottom-6 right-6 z-[70] p-4 rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-800 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4">
+            <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-lg">check_circle</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-white">Password Updated</span>
+              <span className="text-[11px] text-slate-300">{passwordSuccessToast}</span>
             </div>
           </div>
         )}

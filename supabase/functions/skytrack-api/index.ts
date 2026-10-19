@@ -378,6 +378,10 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleDeleteEmployee(employee, body, user);
     }
 
+    if (action === "super_admin_change_employee_password") {
+      return await handleSuperAdminChangeEmployeePassword(employee, body, user);
+    }
+
     if (action === "update_profile_photo") {
       return await handleUpdateProfilePhoto(employee, body);
     }
@@ -3759,6 +3763,210 @@ async function handleDeleteEmployee(caller: any, body: any, authUser: any): Prom
       success: false,
       error: "delete_employee_failed",
       message: error instanceof Error ? error.message : "Failed to delete employee."
+    }, 500);
+  }
+}
+
+async function handleSuperAdminChangeEmployeePassword(
+  caller: any,
+  body: any,
+  authUser?: any
+) {
+  try {
+    const role = String(caller?.role ?? "").toLowerCase();
+    const isSuperAdmin = role === "super_admin";
+
+    // 1. Strict Super Admin role enforcement
+    if (!isSuperAdmin) {
+      return json({
+        success: false,
+        error: "forbidden",
+        message: "Only Super Admins have permission to change employee passwords."
+      }, 403);
+    }
+
+    const targetEmployeeId = String(body.targetEmployeeId ?? body.target_employee_id ?? "").trim();
+    const newPassword = String(body.newPassword ?? body.new_password ?? "").trim();
+    const adminPassword = String(body.adminPassword ?? body.admin_password ?? body.password ?? "").trim();
+
+    if (!targetEmployeeId) {
+      return json({
+        success: false,
+        error: "missing_target_employee_id",
+        message: "Target employee ID is required."
+      }, 400);
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return json({
+        success: false,
+        error: "invalid_new_password",
+        message: "New password must be at least 6 characters."
+      }, 400);
+    }
+
+    if (!adminPassword) {
+      return json({
+        success: false,
+        error: "missing_admin_password",
+        message: "Super Admin password is required for 2FA verification."
+      }, 400);
+    }
+
+    // 2. Fetch target employee
+    const { data: targetEmployee, error: targetError } = await adminClient
+      .from("employees")
+      .select("id, name, employee_id, email, auth_user_id, role")
+      .eq("id", targetEmployeeId)
+      .maybeSingle();
+
+    if (targetError) {
+      return json({
+        success: false,
+        error: "database_error",
+        message: targetError.message
+      }, 500);
+    }
+
+    if (!targetEmployee) {
+      return json({
+        success: false,
+        error: "employee_not_found",
+        message: "Target employee not found."
+      }, 404);
+    }
+
+    // 3. 2FA Verification: Verify calling super admin's password against Supabase auth
+    const adminEmail = caller.email || authUser?.email;
+    if (!adminEmail) {
+      return json({
+        success: false,
+        error: "admin_email_missing",
+        message: "Super Admin email not found for authentication."
+      }, 500);
+    }
+
+    const { data: authData, error: authError } = await authClient.auth.signInWithPassword({
+      email: adminEmail,
+      password: adminPassword
+    });
+
+    if (authError || !authData.user) {
+      return json({
+        success: false,
+        error: "invalid_password",
+        message: "The password is wrong."
+      }, 401);
+    }
+
+    // 4. Update the target employee's password in Supabase Auth
+    let authUserId = targetEmployee.auth_user_id;
+
+    if (authUserId) {
+      const { error: updateError } = await adminClient.auth.admin.updateUserById(
+        authUserId,
+        { password: newPassword }
+      );
+
+      if (updateError) {
+        console.warn("Error updating user by id, falling back to email lookup:", updateError);
+        const { data: userList } = await adminClient.auth.admin.listUsers();
+        const existingAuth = userList?.users?.find(
+          (u: any) => u.email?.toLowerCase() === targetEmployee.email?.toLowerCase()
+        );
+
+        if (existingAuth) {
+          const { error: retryError } = await adminClient.auth.admin.updateUserById(
+            existingAuth.id,
+            { password: newPassword }
+          );
+          if (retryError) {
+            return json({
+              success: false,
+              error: "password_update_failed",
+              message: retryError.message
+            }, 500);
+          }
+          if (existingAuth.id !== targetEmployee.auth_user_id) {
+            await adminClient
+              .from("employees")
+              .update({ auth_user_id: existingAuth.id })
+              .eq("id", targetEmployee.id);
+          }
+        } else {
+          return json({
+            success: false,
+            error: "password_update_failed",
+            message: updateError.message
+          }, 500);
+        }
+      }
+    } else {
+      // If auth_user_id was null on employee record
+      if (!targetEmployee.email) {
+        return json({
+          success: false,
+          error: "missing_employee_email",
+          message: "Employee does not have an email address configured."
+        }, 400);
+      }
+
+      // Check if auth user exists with this email
+      const { data: userList } = await adminClient.auth.admin.listUsers();
+      const existingAuth = userList?.users?.find(
+        (u: any) => u.email?.toLowerCase() === targetEmployee.email.toLowerCase()
+      );
+
+      if (existingAuth) {
+        const { error: updateError } = await adminClient.auth.admin.updateUserById(
+          existingAuth.id,
+          { password: newPassword }
+        );
+        if (updateError) {
+          return json({
+            success: false,
+            error: "password_update_failed",
+            message: updateError.message
+          }, 500);
+        }
+        await adminClient
+          .from("employees")
+          .update({ auth_user_id: existingAuth.id })
+          .eq("id", targetEmployee.id);
+      } else {
+        // Create new auth user
+        const { data: newAuth, error: createError } = await adminClient.auth.admin.createUser({
+          email: targetEmployee.email,
+          password: newPassword,
+          email_confirm: true
+        });
+
+        if (createError || !newAuth?.user) {
+          return json({
+            success: false,
+            error: "auth_user_creation_failed",
+            message: createError?.message || "Failed to create authentication user."
+          }, 500);
+        }
+
+        await adminClient
+          .from("employees")
+          .update({ auth_user_id: newAuth.user.id })
+          .eq("id", targetEmployee.id);
+      }
+    }
+
+    return json({
+      success: true,
+      message: `Password for ${targetEmployee.name} (${targetEmployee.employee_id || targetEmployee.id}) has been updated successfully.`
+    });
+
+  } catch (error) {
+    console.error("Super Admin change password error:", error);
+    return json({
+      success: false,
+      error: "change_password_failed",
+      message: error instanceof Error ? error.message : "Failed to change employee password."
     }, 500);
   }
 }

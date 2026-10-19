@@ -2254,6 +2254,20 @@ export async function deleteEmployee(
   })
 }
 
+export async function superAdminChangeEmployeePassword(
+  token: string,
+  targetEmployeeId: string,
+  newPassword: string,
+  adminPassword: string
+): Promise<{ success: boolean; message: string }> {
+  return fetchSkyTrackApi(token, {
+    action: 'super_admin_change_employee_password',
+    targetEmployeeId,
+    newPassword,
+    adminPassword,
+  })
+}
+
 // --- LEAVE MANAGEMENT API INTEGRATION ---
 
 export interface SkyTrackLeave {
