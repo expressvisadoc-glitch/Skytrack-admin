@@ -86,6 +86,7 @@ export interface DashboardSummary {
   employeeGrowth: string | null
   presentToday: number
   presentPercentage: number
+  onBreakToday: number
   absentToday: number
   absentPercentage: number
   onLeave: number
@@ -103,7 +104,10 @@ export interface DashboardAttendanceRecord {
   date: string
   startTime: string
   endTime: string
-  status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave'
+  status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' | 'On Break'
+  isOnBreak?: boolean
+  breakStartedAt?: string | null
+  breakDuration?: string
 }
 
 export interface DashboardLeaveRequest {
@@ -126,7 +130,7 @@ export interface DashboardRecentActivity {
   badgeColor?: string
   time: string
   timestamp: string
-  activityType: 'start_work' | 'end_work' | 'leave_request'
+  activityType: 'start_work' | 'end_work' | 'leave_request' | 'break'
   icon: string
   iconBg: string
   iconColor: string
@@ -590,7 +594,7 @@ export async function getAdminDashboardData(
   )
   const pendingLeaveRequestsCount = pendingLeaves.length
 
-  // 3. Attendance Analysis (Present Today & Absent Today)
+  // 3. Attendance Analysis (Present Today, On Break, & Absent Today)
   const presentRecords = attendanceList.filter((att) => {
     const status = (att.status || '').toLowerCase()
     return (
@@ -602,6 +606,8 @@ export async function getAdminDashboardData(
     )
   })
   const presentToday = presentRecords.length
+
+  const onBreakToday = attendanceList.filter((att) => Boolean(att.break_started_at && !att.check_out)).length
 
   // Absent Today: Employees without check-in AND not on approved leave today
   const absentToday = Math.max(0, totalEmployees - presentToday - onLeaveCount)
@@ -626,15 +632,19 @@ export async function getAdminDashboardData(
       (lv) => lv.employee_id === emp.id || lv.employee_id === emp.employee_id
     )
 
-    let status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' = 'Absent'
+    const isOnBreak = Boolean(attRecord && attRecord.break_started_at && !attRecord.check_out)
+
+    let status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' | 'On Break' = 'Absent'
     let startTime = '—'
     let endTime = '—'
 
     if (attRecord) {
       startTime = formatTime(attRecord.check_in)
-      endTime = formatTime(attRecord.check_out)
+      endTime = isOnBreak ? '— (On Break)' : formatTime(attRecord.check_out)
       const rawStatus = (attRecord.status || '').toLowerCase()
-      if (rawStatus === 'late') {
+      if (isOnBreak) {
+        status = 'On Break'
+      } else if (rawStatus === 'late') {
         status = 'Late'
       } else if (rawStatus === 'half_day' || rawStatus === 'half day') {
         status = 'Half Day'
@@ -671,6 +681,8 @@ export async function getAdminDashboardData(
       startTime,
       endTime,
       status,
+      isOnBreak,
+      breakStartedAt: attRecord?.break_started_at ?? null,
     }
   })
 
@@ -738,6 +750,27 @@ export async function getAdminDashboardData(
         iconColor: 'text-slate-700 border-slate-200',
       })
     }
+
+    // Breaks
+    if (att.break_started_at) {
+      const emp = att.employees || {}
+      const time = formatTime(att.break_started_at)
+      const isCurrentlyOnBreak = !att.check_out
+      activities.push({
+        id: `att-break-${att.id}`,
+        user: emp.name || 'Employee',
+        employeeId: emp.employee_id || '—',
+        action: isCurrentlyOnBreak ? `started break at ${time}` : `took break at ${time}`,
+        badgeText: isCurrentlyOnBreak ? '(On Break)' : '(Break)',
+        badgeColor: 'text-amber-700 bg-amber-50 border border-amber-200/60',
+        time,
+        timestamp: att.break_started_at,
+        activityType: 'break',
+        icon: 'coffee',
+        iconBg: 'bg-amber-50',
+        iconColor: 'text-amber-600 border-amber-100',
+      })
+    }
   })
 
   // Leave Submissions
@@ -782,6 +815,7 @@ export async function getAdminDashboardData(
       employeeGrowth,
       presentToday,
       presentPercentage,
+      onBreakToday,
       absentToday,
       absentPercentage,
       onLeave: onLeaveCount,
@@ -809,7 +843,7 @@ export interface EmployeeDirectoryItem {
   initialsBg?: string
   initialsColor?: string
   attendanceToday: {
-    type: 'present' | 'late' | 'absent' | 'half_day' | 'leave'
+    type: 'present' | 'late' | 'absent' | 'half_day' | 'leave' | 'on_break'
     label: string
     time?: string
   }
@@ -818,7 +852,9 @@ export interface EmployeeDirectoryItem {
     type?: string
   }
   accountStatus: 'Active' | 'Suspended' | 'Pending'
-  filterCategory: 'present' | 'leave' | 'absent'
+  filterCategory: 'present' | 'leave' | 'absent' | 'on_break'
+  isOnBreak?: boolean
+  breakStartedAt?: string | null
   reportingManagerId?: string | null
   departmentId?: string | null
   workShiftId?: string | null
@@ -886,13 +922,18 @@ export async function getEmployeesDirectory(
       return lv.status?.toLowerCase() === 'pending'
     })
 
-    let attType: 'present' | 'late' | 'absent' | 'half_day' | 'leave' = 'absent'
+    const isOnBreak = Boolean(attRecord && attRecord.break_started_at && !attRecord.check_out)
+
+    let attType: 'present' | 'late' | 'absent' | 'half_day' | 'leave' | 'on_break' = 'absent'
     let attLabel = 'Absent'
     let attTime: string | undefined = undefined
 
     if (attRecord) {
       const rawStatus = (attRecord.status || '').toLowerCase()
-      if (rawStatus === 'late') {
+      if (isOnBreak) {
+        attType = 'on_break'
+        attLabel = 'On Break'
+      } else if (rawStatus === 'late') {
         attType = 'late'
         attLabel = 'Late'
       } else if (rawStatus === 'half_day' || rawStatus === 'half day') {
@@ -929,8 +970,10 @@ export async function getEmployeesDirectory(
       }
     }
 
-    let filterCategory: 'present' | 'leave' | 'absent' = 'absent'
-    if (attType === 'present' || attType === 'late' || attType === 'half_day') {
+    let filterCategory: 'present' | 'leave' | 'absent' | 'on_break' = 'absent'
+    if (isOnBreak) {
+      filterCategory = 'on_break'
+    } else if (attType === 'present' || attType === 'late' || attType === 'half_day') {
       filterCategory = 'present'
     } else if (attType === 'leave') {
       filterCategory = 'leave'
@@ -1091,7 +1134,10 @@ export interface FullAttendanceRecord {
   date: string
   startWork: string
   endWork: string
-  status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave'
+  status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' | 'On Break'
+  isOnBreak: boolean
+  breakStartedAt?: string | null
+  totalBreakSeconds?: number | null
   workedMinutes?: number | null
   breakMinutes?: number | null
   activeHours?: string
@@ -1154,6 +1200,7 @@ export async function getDailyAttendance(
   counts: {
     all: number
     present: number
+    onBreak: number
     late: number
     absent: number
     halfDay: number
@@ -1186,6 +1233,7 @@ export async function getDailyAttendance(
   const recentAttendanceList = allRecentAttendance || []
 
   let presentCount = 0
+  let onBreakCount = 0
   let lateCount = 0
   let halfDayCount = 0
   let leaveCount = 0
@@ -1204,7 +1252,9 @@ export async function getDailyAttendance(
       return from <= targetDate && to >= targetDate
     })
 
-    let status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' = 'Absent'
+    const isOnBreak = Boolean(attRecord && attRecord.break_started_at && !attRecord.check_out)
+
+    let status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' | 'On Break' = 'Absent'
     let startWork = '—'
     let endWork = '—'
     let workedMinutes: number | null = null
@@ -1216,6 +1266,8 @@ export async function getDailyAttendance(
       const past1159 = isDatePast1159(targetDate, todayIso)
       if (attRecord.check_out) {
         endWork = formatTime(attRecord.check_out)
+      } else if (isOnBreak) {
+        endWork = '— (On Break)'
       } else {
         endWork = past1159 ? '06:00 PM' : '— (In Progress)'
       }
@@ -1227,7 +1279,10 @@ export async function getDailyAttendance(
       activeHours = `${h}h ${String(m).padStart(2, '0')}m`
 
       const rawStatus = (attRecord.status || '').toLowerCase()
-      if (rawStatus === 'late') {
+      if (isOnBreak) {
+        status = 'On Break'
+        onBreakCount++
+      } else if (rawStatus === 'late') {
         status = 'Late'
         lateCount++
       } else if (rawStatus === 'half_day' || rawStatus === 'half day') {
@@ -1321,6 +1376,9 @@ export async function getDailyAttendance(
       attendanceDbId: attRecord?.id ?? null,
       hasCheckedIn: Boolean(attRecord?.check_in),
       hasCheckedOut: Boolean(attRecord?.check_out),
+      isOnBreak,
+      breakStartedAt: attRecord?.break_started_at ?? null,
+      totalBreakSeconds: attRecord?.total_break_seconds ?? null,
     }
   })
 
@@ -1329,6 +1387,7 @@ export async function getDailyAttendance(
     counts: {
       all: employees.length,
       present: presentCount,
+      onBreak: onBreakCount,
       late: lateCount,
       absent: absentCount,
       halfDay: halfDayCount,

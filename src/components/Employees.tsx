@@ -13,7 +13,7 @@ export function Employees() {
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [currentFilter, setCurrentFilter] = useState<'all' | 'present' | 'leave' | 'absent'>('all')
+  const [currentFilter, setCurrentFilter] = useState<'all' | 'present' | 'on_break' | 'leave' | 'absent'>('all')
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDirectoryItem | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -130,9 +130,10 @@ export function Employees() {
   const counts = useMemo(() => {
     const all = employees.length
     const present = employees.filter((e) => e.filterCategory === 'present').length
+    const onBreak = employees.filter((e) => e.filterCategory === 'on_break').length
     const leave = employees.filter((e) => e.filterCategory === 'leave').length
     const absent = employees.filter((e) => e.filterCategory === 'absent').length
-    return { all, present, leave, absent }
+    return { all, present, onBreak, leave, absent }
   }, [employees])
 
   // Filter logic
@@ -278,6 +279,26 @@ export function Employees() {
                   }`}
                 >
                   {counts.present}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setCurrentFilter('on_break')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${
+                  currentFilter === 'on_break'
+                    ? 'font-semibold bg-red-600 text-white shadow-sm shadow-red-600/20'
+                    : 'font-medium bg-slate-100/90 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900 border border-slate-200/60'
+                }`}
+                type="button"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                <span>On Break</span>
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${
+                    currentFilter === 'on_break' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {counts.onBreak}
                 </span>
               </button>
 
@@ -473,6 +494,12 @@ export function Employees() {
                                 </span>
                               )}
                             </span>
+                          </div>
+                        )}
+                        {emp.attendanceToday.type === 'on_break' && (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                            <span>On Break</span>
                           </div>
                         )}
                         {emp.attendanceToday.type === 'absent' && (

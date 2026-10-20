@@ -19,6 +19,7 @@ export function Attendance() {
   const [counts, setCounts] = useState({
     all: 0,
     present: 0,
+    onBreak: 0,
     late: 0,
     absent: 0,
     halfDay: 0,
@@ -28,7 +29,7 @@ export function Attendance() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [currentFilter, setCurrentFilter] = useState<
-    'All' | 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave'
+    'All' | 'Present' | 'On Break' | 'Late' | 'Absent' | 'Half Day' | 'Leave'
   >('All')
   const [selectedId, setSelectedId] = useState<string>('')
   const [downloadToast, setDownloadToast] = useState(false)
@@ -385,7 +386,7 @@ export function Attendance() {
           </div>
 
           {/* Top Counters */}
-          <div className="flex items-center gap-3 self-start lg:self-center">
+          <div className="flex items-center gap-3 self-start lg:self-center flex-wrap">
             <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-white border border-slate-200/80 shadow-sm">
               <span className="relative flex h-2.5 w-2.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -400,6 +401,23 @@ export function Attendance() {
                 </span>
               </div>
             </div>
+
+            {counts.onBreak > 0 && (
+              <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-amber-50 border border-amber-200/90 shadow-sm">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">
+                    ON BREAK
+                  </span>
+                  <span className="text-sm font-bold text-amber-900">
+                    {counts.onBreak} On Break
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-white border border-slate-200/80 shadow-sm">
               <span className="h-2.5 w-2.5 rounded-full bg-red-600"></span>
@@ -584,6 +602,27 @@ export function Attendance() {
                 }`}
               >
                 {counts.present}
+              </span>
+            </button>
+
+            {/* On Break */}
+            <button
+              onClick={() => setCurrentFilter('On Break')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition-all ${
+                currentFilter === 'On Break'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white font-semibold shadow-sm shadow-amber-500/20'
+                  : 'bg-slate-50 hover:bg-slate-100 border border-slate-200/60 text-slate-700 font-medium'
+              }`}
+              type="button"
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+              <span>On Break</span>
+              <span
+                className={`text-[11px] font-semibold ${
+                  currentFilter === 'On Break' ? 'text-white/80' : 'text-slate-400'
+                }`}
+              >
+                {counts.onBreak}
               </span>
             </button>
 
@@ -799,6 +838,11 @@ export function Attendance() {
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Present
                               </span>
                             )}
+                            {row.status === 'On Break' && (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 font-bold text-[11px] border border-amber-200/90 shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> On Break
+                              </span>
+                            )}
                             {row.status === 'Late' && (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold text-[11px]">
                                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Late
@@ -924,6 +968,8 @@ export function Attendance() {
                         className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                           selectedRecord.status === 'Present'
                             ? 'bg-emerald-50 text-emerald-700'
+                            : selectedRecord.status === 'On Break'
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
                             : selectedRecord.status === 'Late'
                             ? 'bg-amber-50 text-amber-700'
                             : selectedRecord.status === 'Absent'
@@ -944,6 +990,29 @@ export function Attendance() {
                     </span>
                   </div>
                 </div>
+
+                {/* Live On Break Audit Banner */}
+                {selectedRecord.status === 'On Break' && (
+                  <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 border border-amber-300/80 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-amber-200/70 text-amber-800 flex items-center justify-center shrink-0">
+                        <span className="material-symbols-outlined text-[19px] animate-pulse">coffee</span>
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-bold text-amber-950 truncate flex items-center gap-1.5">
+                          <span>Currently On Break</span>
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                        </span>
+                        <span className="text-[11px] text-amber-800">
+                          {selectedRecord.breakStartedAt
+                            ? `Break started at ${formatTime(selectedRecord.breakStartedAt)}`
+                            : 'Employee paused work session'}
+                          {selectedRecord.breakMinutes ? ` • ${selectedRecord.breakMinutes}m total break` : ''}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Today/Selected Date Punch Status Overview */}
                 <div className="grid grid-cols-2 gap-2">

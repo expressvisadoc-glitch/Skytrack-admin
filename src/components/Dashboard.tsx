@@ -12,7 +12,7 @@ export function Dashboard() {
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<
-    'All' | 'Present' | 'Late' | 'Absent' | 'Leave'
+    'All' | 'Present' | 'On Break' | 'Late' | 'Absent' | 'Leave'
   >('All')
   const [selectedLeave, setSelectedLeave] = useState<DashboardLeaveRequest | null>(
     null
@@ -47,6 +47,8 @@ export function Dashboard() {
     if (statusFilter === 'All') return true
     if (statusFilter === 'Present')
       return record.status === 'Present' || record.status === 'Half Day'
+    if (statusFilter === 'On Break')
+      return record.status === 'On Break'
     return record.status === statusFilter
   })
 
@@ -126,6 +128,7 @@ export function Dashboard() {
     employeeGrowth: null,
     presentToday: 0,
     presentPercentage: 0,
+    onBreakToday: 0,
     absentToday: 0,
     absentPercentage: 0,
     onLeave: 0,
@@ -229,10 +232,16 @@ export function Dashboard() {
               <span className="text-3xl font-extrabold text-slate-900 tracking-tight">
                 {summary.presentToday}
               </span>
-              <div className="flex items-center gap-1.5 mt-2">
+              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                 <span className="px-2 py-0.5 rounded-full bg-emerald-100/70 text-emerald-700 font-bold text-xs">
                   {summary.presentPercentage}%
                 </span>
+                {summary.onBreakToday > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                    {summary.onBreakToday} on break
+                  </span>
+                )}
                 <span className="text-xs text-slate-400">Checked-in for work</span>
               </div>
             </div>
@@ -337,8 +346,8 @@ export function Dashboard() {
               </div>
 
               {/* Filter Pills */}
-              <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-2xl">
-                {(['All', 'Present', 'Late', 'Absent', 'Leave'] as const).map((filter) => {
+              <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-2xl flex-wrap">
+                {(['All', 'Present', 'On Break', 'Late', 'Absent', 'Leave'] as const).map((filter) => {
                   const isActive = statusFilter === filter
                   return (
                     <button
@@ -432,18 +441,23 @@ export function Dashboard() {
                         </td>
                         <td className="py-3 px-4 text-right">
                           <span
-                            className={`inline-flex items-center px-2.5 py-1 rounded-full font-bold text-xs ${
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-bold text-xs ${
                               row.status === 'Present'
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                                : row.status === 'On Break'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200/90 shadow-2xs'
                                 : row.status === 'Late'
                                 ? 'bg-red-50 text-red-600 border border-red-100'
                                 : row.status === 'Absent'
                                 ? 'bg-rose-100/70 text-rose-700 border border-rose-200'
                                 : row.status === 'Half Day'
                                 ? 'bg-slate-100 text-slate-700 border border-slate-200'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200/60'
+                                : 'bg-purple-50 text-purple-700 border border-purple-200/60'
                             }`}
                           >
+                            {row.status === 'On Break' && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                            )}
                             {row.status === 'Leave' ? 'Leave (Approved)' : row.status}
                           </span>
                         </td>
