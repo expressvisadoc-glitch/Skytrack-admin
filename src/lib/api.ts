@@ -19,6 +19,44 @@ const SUPABASE_ANON_KEY =
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
   'sb_publishable_hvKs5JBFtNafLUmmsD0WHw_6mWC6oEc'
 
+export const SESSION_EXPIRED_EVENT = 'skytrack:session_expired'
+
+export function isSessionExpiredError(errorOrMessage: any): boolean {
+  if (!errorOrMessage) return false
+  const msg = typeof errorOrMessage === 'string'
+    ? errorOrMessage
+    : errorOrMessage?.message || errorOrMessage?.error || errorOrMessage?.code || ''
+  
+  const lower = String(msg).toLowerCase()
+  return (
+    lower.includes('session is invalid or expired') ||
+    lower.includes('invalid_session') ||
+    lower.includes('session_expired') ||
+    lower.includes('your session is invalid') ||
+    lower.includes('session has expired') ||
+    lower.includes('jwt expired') ||
+    lower.includes('token expired') ||
+    lower === 'session_expired' ||
+    lower === 'invalid_session'
+  )
+}
+
+export function notifySessionExpired(message?: string) {
+  try {
+    sessionStorage.removeItem('skytrack_session')
+    sessionStorage.removeItem('skytrack_admin_session')
+    sessionStorage.setItem('skytrack_session_expired_notice', 'true')
+  } catch (_) {}
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(SESSION_EXPIRED_EVENT, {
+        detail: { message: message || 'Your session is invalid or expired.' }
+      })
+    )
+  }
+}
+
 export interface SkyTrackEmployee {
   id?: string
   employeeId?: string
@@ -297,6 +335,7 @@ async function fetchSupabaseRest<T = any>(
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
+      notifySessionExpired('Your session is invalid or expired.')
       throw new Error('SESSION_EXPIRED')
     }
     throw new Error(`Supabase query failed: ${response.statusText}`)
@@ -330,6 +369,7 @@ async function patchSupabaseRest<T = any>(
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
+      notifySessionExpired('Your session is invalid or expired.')
       throw new Error('SESSION_EXPIRED')
     }
     throw new Error(`Supabase query failed: ${response.statusText}`)
@@ -366,6 +406,7 @@ async function postSupabaseRest<T = any>(
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
+      notifySessionExpired('Your session is invalid or expired.')
       throw new Error('SESSION_EXPIRED')
     }
     const errText = await response.text()
@@ -461,30 +502,50 @@ function formatOperationalDate(d: Date): string {
 }
 
 export async function getOrganizationData(token: string): Promise<OrganizationData> {
-  const payload = { action: 'organization_data' }
-  const response = await fetch(SKYTRACK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify(payload),
-  })
+  return fetchSkyTrackApi<OrganizationData>(token, { action: 'organization_data' })
+}
 
-  let data: any
+export async function resolveReportingManagerNameFromOrg(
+  token: string,
+  reportingManagerId?: string | null
+): Promise<string | null> {
+  if (!reportingManagerId) return null
+  const trimmed = String(reportingManagerId).trim()
+  if (
+    !trimmed ||
+    trimmed.toLowerCase() === 'null' ||
+    trimmed.toLowerCase() === 'undefined' ||
+    trimmed.toLowerCase() === 'not assigned' ||
+    trimmed.toLowerCase() === 'not_assigned'
+  ) {
+    return null
+  }
+  // If it's already a regular name (not a UUID and has letters and spaces)
+  if (!isUuid(trimmed) && /^[a-zA-Z\s\.\,\'-]+$/.test(trimmed) && trimmed.length > 2 && trimmed.includes(' ')) {
+    return trimmed
+  }
   try {
-    data = await response.json()
-  } catch (err) {
-    throw new Error('Invalid JSON response.')
-  }
-
-  if (!response.ok || !data.success) {
-    if (response.status === 401 || response.status === 403 || data.error === 'invalid_session') {
-      throw new Error('SESSION_EXPIRED')
+    const org = await getOrganizationData(token).catch(() => null)
+    if (org?.managers && Array.isArray(org.managers)) {
+      const matched = org.managers.find(
+        (m: any) =>
+          (m.id && m.id.toLowerCase() === trimmed.toLowerCase()) ||
+          (m.employee_id && m.employee_id.trim().toLowerCase() === trimmed.toLowerCase()) ||
+          (m.auth_user_id && m.auth_user_id.toLowerCase() === trimmed.toLowerCase()) ||
+          (m.name && m.name.trim().toLowerCase() === trimmed.toLowerCase())
+      )
+      if (matched?.name) {
+        return matched.name.trim()
+      }
     }
-    throw new Error(data.message || 'Failed to load organization data.')
+  } catch (err) {
+    console.warn('Failed to resolve reporting manager from org:', err)
   }
-  return data as OrganizationData
+  // Fallback: If trimmed is an assigned manager code (e.g. SKY001) rather than a UUID, return it directly
+  if (!isUuid(trimmed) && trimmed.length >= 2) {
+    return trimmed
+  }
+  return null
 }
 
 export async function updateEmployeeOrganization(
@@ -518,7 +579,14 @@ export async function updateEmployeeOrganization(
   }
 
   if (!response.ok || !data.success) {
-    if (response.status === 401 || response.status === 403 || data.error === 'invalid_session') {
+    if (
+      response.status === 401 ||
+      response.status === 403 ||
+      data.error === 'invalid_session' ||
+      isSessionExpiredError(data.message) ||
+      isSessionExpiredError(data.error)
+    ) {
+      notifySessionExpired('Your session is invalid or expired.')
       throw new Error('SESSION_EXPIRED')
     }
     throw new Error(data.message || 'Failed to update organization data.')
@@ -2148,6 +2216,15 @@ export async function getAdminProfile(
     }
   }
 
+  let managerName: string | null = null
+  if (empRecord?.reporting_manager_id) {
+    try {
+      managerName = await resolveReportingManagerNameFromOrg(token, empRecord.reporting_manager_id)
+    } catch (err) {
+      console.warn('Could not resolve reporting manager name in getAdminProfile:', err)
+    }
+  }
+
   return {
     ...(empRecord || {}),
     id: empRecord?.id || effectiveSub || '',
@@ -2158,6 +2235,12 @@ export async function getAdminProfile(
     designation: empRecord?.designation || empRecord?.role || 'System Administrator',
     department: deptName,
     profile_photo_url: empRecord?.profile_photo_url || undefined,
+    reporting_manager_id: empRecord?.reporting_manager_id || null,
+    reportingManagerId: empRecord?.reporting_manager_id || null,
+    reporting_manager_name: managerName || empRecord?.reporting_manager_name || null,
+    managerName: managerName || empRecord?.managerName || null,
+    manager_name: managerName || empRecord?.manager_name || null,
+    reportingManager: managerName || empRecord?.reportingManager || null
   }
 }
 
@@ -2393,15 +2476,33 @@ async function fetchSkyTrackApi<T = any>(token: string, payload: any): Promise<T
       }
 
       if (!response.ok || data.success === false) {
-        throw new Error(data?.message || data?.error || 'SkyTrack API request failed.')
+        const errorMsg = data?.message || data?.error || 'SkyTrack API request failed.'
+        if (
+          response.status === 401 ||
+          response.status === 403 ||
+          data?.error === 'invalid_session' ||
+          data?.error === 'unauthorized' ||
+          isSessionExpiredError(errorMsg)
+        ) {
+          notifySessionExpired(errorMsg)
+          throw new Error('Your session is invalid or expired.')
+        }
+        throw new Error(errorMsg)
       }
 
       return data as T
     } catch (err: any) {
+      if (isSessionExpiredError(err)) {
+        notifySessionExpired(err?.message)
+        throw err
+      }
       lastError = err
     }
   }
 
+  if (isSessionExpiredError(lastError)) {
+    notifySessionExpired(lastError?.message)
+  }
   throw lastError || new Error('SkyTrack API request failed.')
 }
 
@@ -2667,6 +2768,33 @@ export async function seedPublicHolidays(token: string): Promise<{ success: bool
   })
 }
 
+export async function deletePublicHoliday(
+  token: string,
+  holiday: { id?: string; date?: string; code?: string; name?: string }
+): Promise<{ success: boolean; message: string }> {
+  return fetchSkyTrackApi(token, {
+    action: 'delete_public_holiday',
+    ...holiday,
+  })
+}
+
+export async function savePublicHoliday(
+  token: string,
+  holiday: {
+    id?: string
+    name: string
+    date: string
+    type?: 'gazetted' | 'restricted'
+    notes?: string
+    branches?: string[]
+  }
+): Promise<{ success: boolean; message: string; holiday?: any }> {
+  return fetchSkyTrackApi(token, {
+    action: 'save_public_holiday',
+    ...holiday,
+  })
+}
+
 /**
  * Converts a date string ('YYYY-MM-DD') and time string ('HH:mm') to an ISO-8601 string in Asia/Kolkata (+05:30)
  */
@@ -2878,5 +3006,171 @@ export async function adminSetAttendance(
     console.error('Failed to set attendance via Supabase REST:', err)
     throw new Error(err?.message || 'Unable to update attendance.')
   }
+}
+
+// =============================================================
+// EMPLOYEE WORKSPACE API METHODS
+// =============================================================
+
+export interface EmployeeTodayAttendance {
+  date: string
+  checkIn: string | null
+  checkOut: string | null
+  breakStartedAt: string | null
+  totalBreakSeconds: number
+  status: string | null
+  hours: string | null
+}
+
+export interface EmployeeMonthlySummary {
+  month: string
+  workingDays: number
+  presentDays: number
+  presentPercent: number
+  completed_attendance_days?: number
+  absentDays: number
+  incompleteDays?: number
+  leaveDays: number
+  public_holiday_days?: number
+  sunday_days?: number
+  totalHours: string
+  averageHours: string
+  totalWorkedMinutes?: number
+}
+
+export interface EmployeeMonthlyAttendanceRecord {
+  date: string
+  attendanceDate?: string
+  name?: string
+  employeeId?: string
+  login: string | null
+  logout: string | null
+  check_in?: string | null
+  check_out?: string | null
+  hours: string
+  breakFormatted: string
+  status: string
+  workedMinutes?: number
+  breakMinutes?: number
+}
+
+export interface PublicHolidayItem {
+  id: string
+  name: string
+  date: string
+  type: 'gazetted' | 'restricted' | string
+}
+
+export async function getEmployeeTodayAttendance(token: string): Promise<{
+  success: boolean
+  attendance: EmployeeTodayAttendance | null
+  message?: string
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'attendance_today',
+  })
+}
+
+export async function startWork(token: string): Promise<{
+  success: boolean
+  message?: string
+  attendance?: any
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'start_work',
+  })
+}
+
+export async function endWork(token: string): Promise<{
+  success: boolean
+  message?: string
+  attendance?: any
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'end_work',
+  })
+}
+
+export async function startBreak(token: string): Promise<{
+  success: boolean
+  message?: string
+  attendance?: any
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'start_break',
+  })
+}
+
+export async function resumeWork(token: string): Promise<{
+  success: boolean
+  message?: string
+  attendance?: any
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'resume_work',
+  })
+}
+
+export async function getPublicHolidaysList(token: string): Promise<{
+  success: boolean
+  holidays: PublicHolidayItem[]
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'public_holidays',
+  })
+}
+
+export async function getEmployeeProfile(token: string): Promise<{
+  success: boolean
+  employee: {
+    id?: string
+    employeeId: string
+    name: string
+    email: string
+    role: string
+    designation?: string
+    department?: string
+    createdAt?: string
+    joiningDate?: string
+    profilePhotoUrl?: string | null
+    avatar?: string | null
+    managerName?: string | null
+    manager_name?: string | null
+    reportingManager?: string | null
+    reporting_manager_name?: string | null
+    reportingManagerId?: string | null
+    reporting_manager_id?: string | null
+    departmentName?: string | null
+    workShiftName?: string | null
+    work_shift_name?: string | null
+  }
+}> {
+  const res = await fetchSkyTrackApi<any>(token, {
+    action: 'get_profile',
+  })
+
+  if (res && res.success && res.employee) {
+    const emp = res.employee
+    const repId = emp.reportingManagerId || emp.reporting_manager_id
+    const currentMgr = emp.managerName || emp.reporting_manager_name || emp.manager_name || emp.reportingManager
+
+    // If manager name is missing, blank, or raw UUID, resolve using organization_data
+    if ((!currentMgr || isUuid(currentMgr) || currentMgr.toLowerCase() === 'not assigned') && repId) {
+      try {
+        const resolvedName = await resolveReportingManagerNameFromOrg(token, repId)
+        const finalName = resolvedName || (!isUuid(repId) ? repId : null)
+        if (finalName) {
+          emp.managerName = finalName
+          emp.reporting_manager_name = finalName
+          emp.manager_name = finalName
+          emp.reportingManager = finalName
+        }
+      } catch (err) {
+        console.warn('Failed to resolve manager name in getEmployeeProfile:', err)
+      }
+    }
+  }
+
+  return res
 }
 

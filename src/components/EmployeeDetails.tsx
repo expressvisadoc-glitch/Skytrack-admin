@@ -14,6 +14,7 @@ import {
   getOrganizationData,
   updateEmployeeOrganization,
   updateEmployeeId,
+  isUuid,
   type OrganizationData,
 } from '../lib/api'
 
@@ -590,9 +591,25 @@ export function EmployeeDetails({
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-slate-400 text-lg">badge</span>
                 <span className="text-sm font-semibold text-slate-800">
-                  {currentEmp?.reportingManagerId && orgData?.managers.find(m => m.id === currentEmp.reportingManagerId)
-                    ? orgData.managers.find(m => m.id === currentEmp.reportingManagerId)?.name
-                    : <span className="text-slate-400 italic font-normal">Not assigned</span>}
+                  {(() => {
+                    const empAny = currentEmp as any
+                    const directName = empAny?.reporting_manager_name || empAny?.reportingManager || empAny?.managerName
+                    if (directName && !isUuid(directName) && directName.toLowerCase() !== 'not assigned' && directName.toLowerCase() !== 'null') {
+                      return directName
+                    }
+                    const repId = empAny?.reportingManagerId || empAny?.reporting_manager_id
+                    if (repId) {
+                      const cleanId = String(repId).trim()
+                      const matched = orgData?.managers.find(
+                        (m: any) => (m.id && m.id.toLowerCase() === cleanId.toLowerCase()) ||
+                                   (m.employee_id && m.employee_id.trim().toLowerCase() === cleanId.toLowerCase()) ||
+                                   (m.auth_user_id && m.auth_user_id.toLowerCase() === cleanId.toLowerCase())
+                      )
+                      if (matched?.name) return matched.name
+                      if (!isUuid(cleanId)) return cleanId
+                    }
+                    return <span className="text-slate-400 italic font-normal">Not assigned</span>
+                  })()}
                 </span>
               </div>
             </div>
@@ -828,7 +845,12 @@ export function EmployeeDetails({
                           Reporting Manager
                         </label>
                         <select
-                          value={editFormData.reportingManagerId}
+                          value={
+                            orgData?.managers.find(
+                              m => (m.id && m.id.toLowerCase() === editFormData.reportingManagerId.toLowerCase()) || 
+                                   (m.employee_id && m.employee_id.toLowerCase() === editFormData.reportingManagerId.toLowerCase())
+                            )?.id || editFormData.reportingManagerId
+                          }
                           onChange={(e) => setEditFormData({ ...editFormData, reportingManagerId: e.target.value })}
                           className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium"
                         >

@@ -120,6 +120,107 @@ Deno.serve(async (req) => {
   }
 });
 
+// =============================================================
+// ORGANIZATION RESOLVERS (MANAGER, DEPARTMENT, WORK SHIFT)
+// =============================================================
+
+async function resolveReportingManagerName(reportingManagerId: string | null | undefined): Promise<string | null> {
+  if (!reportingManagerId) return null;
+  try {
+    const trimmed = String(reportingManagerId).trim();
+    if (
+      !trimmed ||
+      trimmed.toLowerCase() === "null" ||
+      trimmed.toLowerCase() === "undefined" ||
+      trimmed.toLowerCase() === "not assigned" ||
+      trimmed.toLowerCase() === "not_assigned"
+    ) {
+      return null;
+    }
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
+    let q = adminClient.from("employees").select("name, employee_id");
+    if (isUuid) {
+      q = q.eq("id", trimmed);
+    } else {
+      q = q.ilike("employee_id", trimmed);
+    }
+    const { data: mgr, error } = await q.maybeSingle();
+    if (!error && mgr?.name && String(mgr.name).trim()) {
+      return String(mgr.name).trim();
+    }
+    // Fallback if UUID was stored as employee_id or vice versa
+    const fallbackQ = isUuid 
+      ? adminClient.from("employees").select("name").ilike("employee_id", trimmed)
+      : adminClient.from("employees").select("name").eq("id", trimmed);
+    const { data: fallbackMgr } = await fallbackQ.maybeSingle();
+    if (fallbackMgr?.name && String(fallbackMgr.name).trim()) {
+      return String(fallbackMgr.name).trim();
+    }
+
+    // Fallback: match auth_user_id in case auth user ID was saved
+    if (isUuid) {
+      const { data: authMgr } = await adminClient.from("employees").select("name").eq("auth_user_id", trimmed).maybeSingle();
+      if (authMgr?.name && String(authMgr.name).trim()) {
+        return String(authMgr.name).trim();
+      }
+    }
+
+    // Fallback: match name directly in case manager name was saved in reporting_manager_id
+    const { data: nameMgr } = await adminClient.from("employees").select("name").ilike("name", trimmed).maybeSingle();
+    if (nameMgr?.name && String(nameMgr.name).trim()) {
+      return String(nameMgr.name).trim();
+    }
+
+    // Fallback: If trimmed contains letters and spaces (e.g. "Dinesh Pillai" or "John Doe"), it's already a name
+    if (!isUuid && /^[a-zA-Z\s\.\,\'-]+$/.test(trimmed) && trimmed.length > 2) {
+      return trimmed;
+    }
+
+    // Fallback: If it's a manager code like SKY001 (not a UUID), return it so client displays the assigned code
+    if (!isUuid && trimmed.length >= 2) {
+      return trimmed;
+    }
+
+    return null;
+  } catch (err) {
+    console.warn("Failed to resolve reporting manager name:", err);
+    return null;
+  }
+}
+
+async function resolveDepartmentName(deptId: string | null | undefined, fallbackDept?: string | null): Promise<string | null> {
+  if (fallbackDept && String(fallbackDept).trim()) return String(fallbackDept).trim();
+  if (!deptId) return null;
+  try {
+    const trimmed = String(deptId).trim();
+    if (!trimmed) return null;
+    const { data, error } = await adminClient.from("departments").select("department_name").eq("id", trimmed).maybeSingle();
+    if (!error && data?.department_name) return String(data.department_name).trim();
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function resolveWorkShiftName(shiftId: string | null | undefined): Promise<string | null> {
+  if (!shiftId) return null;
+  try {
+    const trimmed = String(shiftId).trim();
+    if (!trimmed) return null;
+    const { data, error } = await adminClient.from("work_shifts").select("shift_name, start_time, end_time").eq("id", trimmed).maybeSingle();
+    if (!error && data?.shift_name) {
+      const name = String(data.shift_name).trim();
+      if (data.start_time && data.end_time) {
+        return `${name} (${String(data.start_time).slice(0, 5)} - ${String(data.end_time).slice(0, 5)})`;
+      }
+      return name;
+    }
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
 async function handleRequest(req: Request): Promise<Response> {
   try {
     if (req.method !== "POST") {
@@ -192,7 +293,7 @@ async function handleRequest(req: Request): Promise<Response> {
     // =========================================================
 
     const {
-      data: employee,
+      data: employeeData,
       error: employeeError
     } = await adminClient
       .from("employees")
@@ -206,7 +307,11 @@ async function handleRequest(req: Request): Promise<Response> {
         auth_user_id,
         created_at,
         joining_date,
-        profile_photo_url
+        profile_photo_url,
+        reporting_manager_id,
+        department_id,
+        work_shift_id,
+        department
       `)
       .eq("auth_user_id", user.id)
       .maybeSingle();
@@ -225,6 +330,38 @@ async function handleRequest(req: Request): Promise<Response> {
         },
         500
       );
+    }
+
+    let employee = employeeData;
+    if (!employee && user.email) {
+      const { data: empByEmail } = await adminClient
+        .from("employees")
+        .select(`
+          id,
+          employee_id,
+          name,
+          email,
+          role,
+          status,
+          auth_user_id,
+          created_at,
+          joining_date,
+          profile_photo_url,
+          reporting_manager_id,
+          department_id,
+          work_shift_id,
+          department
+        `)
+        .ilike("email", user.email)
+        .maybeSingle();
+
+      if (empByEmail) {
+        employee = empByEmail;
+        await adminClient
+          .from("employees")
+          .update({ auth_user_id: user.id })
+          .eq("id", empByEmail.id);
+      }
     }
 
     if (!employee) {
@@ -359,6 +496,14 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleSeedPublicHolidays(employee);
     }
 
+    if (action === "delete_public_holiday" || action === "admin_delete_holiday") {
+      return await handleDeletePublicHoliday(employee, body);
+    }
+
+    if (action === "save_public_holiday" || action === "upsert_public_holiday") {
+      return await handleSavePublicHoliday(employee, body);
+    }
+
     if (action === "organization_data") {
       return await handleOrganizationData(employee);
     }
@@ -463,7 +608,11 @@ async function handleLogin(body: any) {
         auth_user_id,
         created_at,
         joining_date,
-        profile_photo_url
+        profile_photo_url,
+        reporting_manager_id,
+        department_id,
+        work_shift_id,
+        department
       `)
       .ilike("email", employeeId)
       .maybeSingle();
@@ -482,7 +631,11 @@ async function handleLogin(body: any) {
         auth_user_id,
         created_at,
         joining_date,
-        profile_photo_url
+        profile_photo_url,
+        reporting_manager_id,
+        department_id,
+        work_shift_id,
+        department
       `)
       .ilike("employee_id", employeeId)
       .maybeSingle();
@@ -502,7 +655,11 @@ async function handleLogin(body: any) {
           auth_user_id,
           created_at,
           joining_date,
-          profile_photo_url
+          profile_photo_url,
+          reporting_manager_id,
+          department_id,
+          work_shift_id,
+          department
         `)
         .ilike("email", employeeId)
         .maybeSingle();
@@ -696,6 +853,12 @@ async function handleLogin(body: any) {
     employee.auth_user_id = authData.user.id;
   }
 
+  const [managerName, departmentName, workShiftName] = await Promise.all([
+    resolveReportingManagerName(employee.reporting_manager_id),
+    resolveDepartmentName(employee.department_id, employee.department),
+    resolveWorkShiftName(employee.work_shift_id)
+  ]);
+
   return json({
     success: true,
     message: "Login successful.",
@@ -708,10 +871,13 @@ async function handleLogin(body: any) {
     },
 
     employee: {
+      id: employee.id,
       employeeId:
         employee.employee_id,
       name:
         employee.name,
+      email:
+        employee.email,
       role:
         employee.role,
       createdAt:
@@ -721,7 +887,17 @@ async function handleLogin(body: any) {
       profilePhotoUrl:
         employee.profile_photo_url || null,
       avatar:
-        employee.profile_photo_url || null
+        employee.profile_photo_url || null,
+      managerName: managerName || null,
+      manager_name: managerName || null,
+      reportingManager: managerName || null,
+      reporting_manager_name: managerName || null,
+      reportingManagerId: employee.reporting_manager_id || null,
+      reporting_manager_id: employee.reporting_manager_id || null,
+      departmentName: departmentName || employee.department || null,
+      department: departmentName || employee.department || null,
+      workShiftName: workShiftName || null,
+      work_shift_name: workShiftName || null
     }
   });
 }
@@ -1429,6 +1605,206 @@ async function handleSeedPublicHolidays(employee: any) {
   }
 }
 
+async function handleDeletePublicHoliday(employee: any, body: any) {
+  try {
+    await ensureAdmin(employee);
+
+    const id = body.id || body.holiday_id || body.holidayId;
+    const date = body.date || body.holiday_date || body.holidayDate;
+    const code = body.code || body.holiday_code || body.holidayCode;
+    const name = body.name || body.holiday_name || body.holidayName;
+
+    if (!id && !date && !code && !name) {
+      return json(
+        {
+          success: false,
+          error: "missing_parameter",
+          message: "Please specify the holiday ID, date, code, or name to delete."
+        },
+        400
+      );
+    }
+
+    const idsToDelete = new Set<string>();
+
+    if (id && typeof id === "string" && id.includes("-")) {
+      idsToDelete.add(id);
+    }
+
+    // Search by ID, code, or date
+    let query = adminClient.from("public_holidays").select("id, holiday_code, holiday_date, holiday_name");
+    if (id) {
+      query = query.eq("id", id);
+    } else if (code) {
+      query = query.eq("holiday_code", code);
+    } else if (date) {
+      query = query.eq("holiday_date", date);
+    }
+
+    const { data: matched } = await query;
+    if (matched && Array.isArray(matched)) {
+      for (const m of matched) {
+        if (m.id) idsToDelete.add(m.id);
+      }
+    }
+
+    // Also match by date if available
+    if (date) {
+      const { data: dateMatches } = await adminClient
+        .from("public_holidays")
+        .select("id")
+        .eq("holiday_date", date);
+      if (dateMatches) {
+        for (const m of dateMatches) {
+          if (m.id) idsToDelete.add(m.id);
+        }
+      }
+    }
+
+    // 1. Delete associated branches first
+    for (const hid of idsToDelete) {
+      await adminClient
+        .from("public_holiday_branches")
+        .delete()
+        .eq("holiday_id", hid);
+    }
+
+    // 2. Delete from public_holidays
+    if (idsToDelete.size > 0) {
+      await adminClient
+        .from("public_holidays")
+        .delete()
+        .in("id", Array.from(idsToDelete));
+    }
+
+    // Fallback: direct delete by date or code or id
+    if (date) {
+      await adminClient
+        .from("public_holidays")
+        .delete()
+        .eq("holiday_date", date);
+    }
+    if (code) {
+      await adminClient
+        .from("public_holidays")
+        .delete()
+        .eq("holiday_code", code);
+    }
+    if (id) {
+      await adminClient
+        .from("public_holidays")
+        .delete()
+        .eq("id", id);
+    }
+
+    // 3. Delete from official_public_holidays if table exists
+    try {
+      if (id) {
+        await adminClient.from("official_public_holidays").delete().eq("id", id);
+      }
+      if (date) {
+        await adminClient.from("official_public_holidays").delete().eq("holiday_date", date);
+      }
+      if (code) {
+        await adminClient.from("official_public_holidays").delete().eq("holiday_code", code);
+      }
+    } catch (_) {
+      // Table may not exist
+    }
+
+    return json({
+      success: true,
+      message: `Holiday ${name ? `"${name}" ` : ""}deleted successfully.`
+    });
+  } catch (err: any) {
+    return json({ success: false, message: err.message }, 500);
+  }
+}
+
+async function handleSavePublicHoliday(employee: any, body: any) {
+  try {
+    await ensureAdmin(employee);
+
+    const id = body.id || body.holiday_id || body.holidayId;
+    const name = (body.name || body.holiday_name || body.holidayName || "").trim();
+    const date = body.date || body.holiday_date || body.holidayDate;
+    const type = body.type || body.holiday_type || body.holidayType || "gazetted";
+    const notes = body.notes || (type === "gazetted" ? "Mandatory central statutory closure across operations" : "Optional roster choice for regional hubs");
+    const branches = body.branches || ["dl", "mh", "ka", "kl", "ts"];
+
+    if (!name || !date) {
+      return json({ success: false, message: "Holiday name and date are required." }, 400);
+    }
+
+    if (id) {
+      // Update existing holiday
+      const { error: updateErr } = await adminClient
+        .from("public_holidays")
+        .update({
+          holiday_name: name,
+          holiday_date: date,
+          holiday_type: type,
+          notes: notes,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", id);
+
+      if (updateErr) throw updateErr;
+
+      // Update branch mappings
+      if (Array.isArray(branches) && branches.length > 0) {
+        await adminClient.from("public_holiday_branches").delete().eq("holiday_id", id);
+        const branchRecords = branches.filter((b: string) => b !== "pan-india").map((b: string) => ({
+          holiday_id: id,
+          branch_code: b
+        }));
+        if (branchRecords.length > 0) {
+          await adminClient.from("public_holiday_branches").insert(branchRecords);
+        }
+      }
+
+      return json({ success: true, message: `Updated "${name}" successfully.` });
+    } else {
+      // Insert new holiday
+      const currentYear = new Date(date).getFullYear() || new Date().getFullYear();
+      const code = body.code || body.holiday_code || `HOL-IN-${currentYear}-${Date.now().toString().slice(-4)}`;
+
+      const { data: inserted, error: insertErr } = await adminClient
+        .from("public_holidays")
+        .insert({
+          holiday_code: code,
+          holiday_name: name,
+          holiday_date: date,
+          holiday_type: type,
+          is_paid: true,
+          status: "published",
+          notes: notes
+        })
+        .select()
+        .single();
+
+      if (insertErr) throw insertErr;
+
+      if (inserted?.id) {
+        const branchList = Array.isArray(branches) && branches.length > 0
+          ? branches.filter((b: string) => b !== "pan-india")
+          : ["dl", "mh", "ka", "kl", "ts"];
+        const branchRecords = branchList.map((b: string) => ({
+          holiday_id: inserted.id,
+          branch_code: b
+        }));
+        if (branchRecords.length > 0) {
+          await adminClient.from("public_holiday_branches").insert(branchRecords);
+        }
+      }
+
+      return json({ success: true, message: `Created "${name}" successfully.`, holiday: inserted });
+    }
+  } catch (err: any) {
+    return json({ success: false, message: err.message }, 500);
+  }
+}
+
 async function handlePublicHolidays() {
   let {
     data: companyHolidays,
@@ -1649,6 +2025,8 @@ async function handleLeaveHistory(
     );
   }
 
+  const managerName = await resolveReportingManagerName(employee.reporting_manager_id);
+
   return json({
     success: true,
     message:
@@ -1657,7 +2035,13 @@ async function handleLeaveHistory(
     leaves:
       (data ?? []).map(
         formatLeave
-      )
+      ),
+    managerName: managerName || null,
+    manager_name: managerName || null,
+    reportingManager: managerName || null,
+    reporting_manager_name: managerName || null,
+    reportingManagerId: employee.reporting_manager_id || null,
+    reporting_manager_id: employee.reporting_manager_id || null
   });
 }
 
@@ -2555,6 +2939,8 @@ async function handleLeaveBalance(
         "sick"
     );
 
+  const managerName = await resolveReportingManagerName(employee.reporting_manager_id);
+
   return json({
     success: true,
 
@@ -2568,7 +2954,13 @@ async function handleLeaveBalance(
         formatLeaveBalance(
           sick
         )
-    }
+    },
+    managerName: managerName || null,
+    manager_name: managerName || null,
+    reportingManager: managerName || null,
+    reporting_manager_name: managerName || null,
+    reportingManagerId: employee.reporting_manager_id || null,
+    reporting_manager_id: employee.reporting_manager_id || null
   });
 }
 
@@ -3629,8 +4021,6 @@ function getIndiaTodayDate(): string {
 
 async function handleOrganizationData(employee: any): Promise<Response> {
   try {
-    await ensureAdmin(employee);
-
     const [
       departmentsResult,
       shiftsResult,
@@ -3672,7 +4062,6 @@ async function handleOrganizationData(employee: any): Promise<Response> {
           role,
           status
         `)
-        .in("role", ["admin", "super_admin"])
         .eq("status", "active")
         .order("name", { ascending: true })
     ]);
@@ -3738,10 +4127,14 @@ async function handleUpdateEmployeeOrganization(employee: any, body: any): Promi
       updateFields.department = departmentName;
     }
 
-    const { data: updatedEmployee, error: updateError } = await adminClient
-      .from("employees")
-      .update(updateFields)
-      .eq("id", employeeId)
+    const isEmpUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employeeId);
+    let updateQuery = adminClient.from("employees").update(updateFields);
+    if (isEmpUuid) {
+      updateQuery = updateQuery.eq("id", employeeId);
+    } else {
+      updateQuery = updateQuery.ilike("employee_id", employeeId);
+    }
+    const { data: updatedEmployee, error: updateError } = await updateQuery
       .select(`
         id,
         employee_id,
@@ -4464,7 +4857,8 @@ async function handleGetProfile(employee: any) {
         profile_photo_url,
         reporting_manager_id,
         department_id,
-        work_shift_id
+        work_shift_id,
+        department
       `)
       .eq("id", employee.id)
       .maybeSingle();
@@ -4480,9 +4874,16 @@ async function handleGetProfile(employee: any) {
       );
     }
 
+    const [managerName, departmentName, workShiftName] = await Promise.all([
+      resolveReportingManagerName(emp.reporting_manager_id),
+      resolveDepartmentName(emp.department_id, emp.department),
+      resolveWorkShiftName(emp.work_shift_id)
+    ]);
+
     return json({
       success: true,
       employee: {
+        id: emp.id,
         employeeId: emp.employee_id,
         name: emp.name,
         email: emp.email,
@@ -4490,7 +4891,17 @@ async function handleGetProfile(employee: any) {
         createdAt: emp.created_at,
         joiningDate: emp.joining_date,
         profilePhotoUrl: emp.profile_photo_url || null,
-        avatar: emp.profile_photo_url || null
+        avatar: emp.profile_photo_url || null,
+        managerName: managerName || null,
+        manager_name: managerName || null,
+        reportingManager: managerName || null,
+        reporting_manager_name: managerName || null,
+        reportingManagerId: emp.reporting_manager_id || null,
+        reporting_manager_id: emp.reporting_manager_id || null,
+        departmentName: departmentName || emp.department || null,
+        department: departmentName || emp.department || null,
+        workShiftName: workShiftName || null,
+        work_shift_name: workShiftName || null
       }
     });
   } catch (err) {

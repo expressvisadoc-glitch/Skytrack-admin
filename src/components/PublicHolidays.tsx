@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { seedPublicHolidays, fetchPublicHolidaysApi } from '../lib/api'
+import { seedPublicHolidays, fetchPublicHolidaysApi, deletePublicHoliday, savePublicHoliday } from '../lib/api'
 
 export interface PublicHolidayItem {
   id: string
@@ -158,8 +158,13 @@ export function PublicHolidays() {
         console.warn('Company holiday query warning:', companyError)
       }
 
-      // If database is empty, automatically populate mandatory holidays in the background
-      if (!companyData || companyData.length === 0) {
+      let deletedKeys: string[] = []
+      try {
+        deletedKeys = JSON.parse(localStorage.getItem('skytrack_deleted_holiday_keys') || '[]')
+      } catch (_e) {}
+
+      // If database is empty and no holidays were intentionally deleted, automatically populate mandatory holidays in the background
+      if ((!companyData || companyData.length === 0) && deletedKeys.length === 0) {
         try {
           if (session?.token) {
             await seedPublicHolidays(session.token)
@@ -303,7 +308,12 @@ export function PublicHolidays() {
         }
       })
 
-      const combined = [...mappedOfficial, ...mappedCompany].sort((a, b) => a.date.localeCompare(b.date))
+      const combined = [...mappedOfficial, ...mappedCompany]
+        .filter(h => {
+          const key = `${h.date}-${h.name.toLowerCase()}`
+          return !deletedKeys.includes(key) && !deletedKeys.includes(h.id) && !deletedKeys.includes(h.date) && !deletedKeys.includes(h.code)
+        })
+        .sort((a, b) => a.date.localeCompare(b.date))
 
       const uniqueHolidays: PublicHolidayItem[] = []
       const seen = new Set()
@@ -325,7 +335,7 @@ export function PublicHolidays() {
 
       const finalHolidays = uniqueHolidays.length > 0
         ? uniqueHolidays
-        : INITIAL_HOLIDAYS.map(h => ({ ...h, sourceType: 'official' } as PublicHolidayItem))
+        : (deletedKeys.length > 0 ? [] : INITIAL_HOLIDAYS.map(h => ({ ...h, sourceType: 'official' } as PublicHolidayItem)))
 
       setHolidays(finalHolidays)
       if (finalHolidays.length > 0 && !selectedHolidayId) {
@@ -428,7 +438,6 @@ export function PublicHolidays() {
   }, [filteredHolidays, currentPage, itemsPerPage])
 
   const handleStartEdit = (item: PublicHolidayItem) => {
-    if (item.sourceType === 'official') return
     setEditingId(item.id)
     setFormName(item.name)
     setFormDate(item.date)
@@ -445,6 +454,70 @@ export function PublicHolidays() {
     setFormClassification('gazetted')
   }
 
+  const handleDeleteHoliday = async (holiday: PublicHolidayItem) => {
+    if (!window.confirm(`Are you sure you want to remove "${holiday.name}" from the ${currentYear} holiday calendar?`)) {
+      return
+    }
+
+    // 1. Optimistic UI update: instantly remove from state
+    setHolidays(prev => prev.filter(h => h.id !== holiday.id && h.date !== holiday.date))
+
+    // 2. Persist to local storage to prevent reload resurrecting
+    try {
+      const deletedSet: string[] = JSON.parse(localStorage.getItem('skytrack_deleted_holiday_keys') || '[]')
+      const holidayKey = `${holiday.date}-${holiday.name.toLowerCase()}`
+      if (!deletedSet.includes(holidayKey)) {
+        deletedSet.push(holidayKey)
+      }
+      if (holiday.id && !deletedSet.includes(holiday.id)) {
+        deletedSet.push(holiday.id)
+      }
+      if (holiday.date && !deletedSet.includes(holiday.date)) {
+        deletedSet.push(holiday.date)
+      }
+      if (holiday.code && !deletedSet.includes(holiday.code)) {
+        deletedSet.push(holiday.code)
+      }
+      localStorage.setItem('skytrack_deleted_holiday_keys', JSON.stringify(deletedSet))
+    } catch (_e) {}
+
+    // 3. Call backend edge function (service role, deletes branches and holiday rows)
+    let apiSuccess = false
+    try {
+      if (session?.token) {
+        const res = await deletePublicHoliday(session.token, {
+          id: holiday.id,
+          date: holiday.date,
+          code: holiday.code,
+          name: holiday.name
+        })
+        if (res && res.success) {
+          apiSuccess = true
+        }
+      }
+    } catch (err: any) {
+      console.warn('Backend API holiday deletion error, trying fallback:', err)
+    }
+
+    // 4. Fallback client-side delete
+    if (!apiSuccess) {
+      try {
+        if (holiday.id) {
+          await supabase.from('public_holiday_branches').delete().eq('holiday_id', holiday.id)
+          await supabase.from('public_holidays').delete().eq('id', holiday.id)
+        }
+        if (holiday.date) {
+          await supabase.from('public_holidays').delete().eq('holiday_date', holiday.date)
+        }
+      } catch (clientErr) {
+        console.warn('Direct client delete fallback error:', clientErr)
+      }
+    }
+
+    showToast(`Removed "${holiday.name}".`)
+    await loadHolidays()
+  }
+
   const handleSubmitHoliday = async () => {
     if (!formName.trim()) {
       showToast('Please specify a valid Holiday Name / Occasion.')
@@ -457,53 +530,64 @@ export function PublicHolidays() {
     }
 
     try {
-      if (editingId) {
-        const { error } = await supabase
-          .from('public_holidays')
-          .update({
-            holiday_name: formName.trim(),
-            holiday_date: formDate,
-            holiday_type: formClassification,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', editingId)
-
-        if (error) throw error
-        showToast(`Successfully updated ${formName.trim()}!`)
+      if (session?.token) {
+        await savePublicHoliday(session.token, {
+          id: editingId || undefined,
+          name: formName.trim(),
+          date: formDate,
+          type: formClassification,
+          branches: ['dl', 'mh', 'ka', 'kl', 'ts']
+        })
+        showToast(editingId ? `Successfully updated ${formName.trim()}!` : `Successfully declared & published "${formName.trim()}"!`)
       } else {
-        const companyHolidays = holidays.filter(h => h.sourceType === 'company')
-        const newCodeNum = companyHolidays.length + 1
-        const newCode = `HOL-IN-${currentYear}-${String(newCodeNum).padStart(3, '0')}`
+        if (editingId) {
+          const { error } = await supabase
+            .from('public_holidays')
+            .update({
+              holiday_name: formName.trim(),
+              holiday_date: formDate,
+              holiday_type: formClassification,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', editingId)
 
-        const { data: inserted, error } = await supabase
-          .from('public_holidays')
-          .insert({
-            holiday_code: newCode,
-            holiday_name: formName.trim(),
-            holiday_date: formDate,
-            holiday_type: formClassification,
-            is_paid: true,
-            status: 'published',
-            notes: formClassification === 'gazetted' ? 'Mandatory central statutory closure across operations' : 'Optional roster choice for regional hubs'
-          })
-          .select()
-          .single()
+          if (error) throw error
+          showToast(`Successfully updated ${formName.trim()}!`)
+        } else {
+          const companyHolidays = holidays.filter(h => h.sourceType === 'company')
+          const newCodeNum = companyHolidays.length + 1
+          const newCode = `HOL-IN-${currentYear}-${String(newCodeNum).padStart(3, '0')}`
 
-        if (error) throw error
+          const { data: inserted, error } = await supabase
+            .from('public_holidays')
+            .insert({
+              holiday_code: newCode,
+              holiday_name: formName.trim(),
+              holiday_date: formDate,
+              holiday_type: formClassification,
+              is_paid: true,
+              status: 'published',
+              notes: formClassification === 'gazetted' ? 'Mandatory central statutory closure across operations' : 'Optional roster choice for regional hubs'
+            })
+            .select()
+            .single()
 
-        const ALL_BRANCHES = ['dl', 'mh', 'ka', 'kl', 'ts']
-        const branchRecords = ALL_BRANCHES.map(b => ({
-          holiday_id: inserted.id,
-          branch_code: b
-        }))
+          if (error) throw error
 
-        const { error: branchesError } = await supabase
-          .from('public_holiday_branches')
-          .insert(branchRecords)
+          const ALL_BRANCHES = ['dl', 'mh', 'ka', 'kl', 'ts']
+          const branchRecords = ALL_BRANCHES.map(b => ({
+            holiday_id: inserted.id,
+            branch_code: b
+          }))
 
-        if (branchesError) throw branchesError
+          const { error: branchesError } = await supabase
+            .from('public_holiday_branches')
+            .insert(branchRecords)
 
-        showToast(`Successfully declared & published "${formName.trim()}"!`)
+          if (branchesError) throw branchesError
+
+          showToast(`Successfully declared & published "${formName.trim()}"!`)
+        }
       }
 
       handleResetForm()
@@ -1236,7 +1320,7 @@ export function PublicHolidays() {
                               onClick={(e) => e.stopPropagation()}
                             >
                               <button
-                                onClick={() => { if (holiday.sourceType !== 'official') handleStartEdit(holiday); }}
+                                onClick={() => handleStartEdit(holiday)}
                                 className="p-2 rounded-xl bg-white border border-slate-200/70 hover:bg-slate-50 text-slate-600 transition-colors shadow-sm cursor-pointer"
                                 title="Edit Holiday"
                                 type="button"
@@ -1247,21 +1331,8 @@ export function PublicHolidays() {
                               </button>
 
                               <button
-                                onClick={() => {
-                                  if (holiday.sourceType === 'official') return;
-                                  if (window.confirm(`Are you sure you want to remove "${holiday.name}" from the ${currentYear} holiday calendar?`)) {
-                                    supabase.from('public_holidays').delete().eq('id', holiday.id).then(({ error }) => {
-                                      if (error) {
-                                        showToast('Error deleting holiday.');
-                                      } else {
-                                        showToast(`Removed "${holiday.name}".`);
-                                        loadHolidays();
-                                      }
-                                    });
-                                  }
-                                }}
-                                className="p-2 rounded-xl bg-white border border-slate-200/70 hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                disabled={holiday.sourceType === 'official'}
+                                onClick={() => handleDeleteHoliday(holiday)}
+                                className="p-2 rounded-xl bg-white border border-slate-200/70 hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors shadow-sm cursor-pointer"
                                 title="Delete Holiday"
                                 type="button"
                               >

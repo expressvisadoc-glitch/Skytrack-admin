@@ -23,7 +23,15 @@ export function Login({ onLoginSuccess }: LoginProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [rememberDevice, setRememberDevice] = useState(() => localStorage.getItem('skytrack_admin_remember') === 'true' || localStorage.getItem('skytrack_admin_remember') === null)
   const [statusState, setStatusState] = useState<'idle' | 'verifying' | 'approved'>('idle')
-  const [errorMessage, setErrorMessage] = useState('')
+  const [errorMessage, setErrorMessage] = useState(() => {
+    try {
+      if (sessionStorage.getItem('skytrack_session_expired_notice') === 'true') {
+        sessionStorage.removeItem('skytrack_session_expired_notice')
+        return 'Your session has expired. Please sign in again to continue.'
+      }
+    } catch (_) {}
+    return ''
+  })
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -114,7 +122,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
                 <span className="text-[11px] font-extrabold tracking-wider uppercase text-red-600">
-                  Admin Authentication
+                  Workspace Authentication
                 </span>
               </div>
             </div>
@@ -127,13 +135,13 @@ export function Login({ onLoginSuccess }: LoginProps) {
               </div>
               <div className="flex flex-col">
                 <div className="flex items-center gap-2">
-                  <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">SkyTrack Admin</h1>
+                  <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">SkyTrack</h1>
                   <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-bold text-[10px] tracking-wider uppercase border border-red-100">
                     Portal
                   </span>
                 </div>
                 <p className="text-xs sm:text-[13px] text-slate-500 font-normal mt-1 leading-relaxed">
-                  Enter your authorized administrator credentials to manage Employees.
+                  Enter your employee ID or administrator credentials to sign in.
                 </p>
               </div>
             </div>

@@ -3,9 +3,10 @@ import { useAuth } from '../contexts/AuthContext'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
+  adminOnly?: boolean
 }
 
-export function ProtectedRoute({ children }: ProtectedRouteProps) {
+export function ProtectedRoute({ children, adminOnly = false }: ProtectedRouteProps) {
   const { session, isAdmin, isLoading, logout } = useAuth()
 
   if (isLoading) {
@@ -24,7 +25,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     return null
   }
 
-  if (!isAdmin) {
+  if (adminOnly && !isAdmin) {
     return (
       <div className="min-h-screen bg-[#f4f6fb] flex flex-col items-center justify-center p-8 text-center">
         <div className="w-20 h-20 rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-6 shadow-sm border border-red-100">
@@ -32,7 +33,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
         </div>
         <h2 className="text-2xl font-extrabold text-slate-900 mb-2">Access Denied</h2>
         <p className="text-slate-500 max-w-md mx-auto mb-6 text-sm leading-relaxed">
-          You are authenticated as an employee, but your account does not have administrator clearance for the SkyTrack Admin Portal.
+          You are authenticated as an employee, but this section requires administrator clearance.
         </p>
         <button
           onClick={logout}
