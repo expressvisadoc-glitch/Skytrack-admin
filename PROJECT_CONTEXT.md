@@ -3,18 +3,18 @@
 > **Audience**: AI Agents, Systems Engineers, and Full-Stack Developers  
 > **Last Updated**: October 2026  
 > **Organization**: Skypass Visa Services  
-> **System Scope**: Android Mobile Client (`SkyTrack_01`), Admin Web Portal (`skytrack-admin`), and Supabase Backend / Edge Functions (`skytrack-api`)
+> **System Scope**: Android Mobile Client (`SkyTrack_01`), Web Application (`skytrack-admin`: Admin Portal & Employee Portal), and Supabase Backend / Edge Functions (`skytrack-api`)
 
 ---
 
 ## 1. System Overview & Architecture
 
-**SkyTrack** is an enterprise workforce management, attendance tracking, and leave administration ecosystem built for **Skypass Visa Services**. It provides real-time GPS/geofenced mobile clock-ins, intelligent break timers with persistent tracking across device reboots, comprehensive leave workflows with statutory entitlement balancing, and an admin web command center.
+**SkyTrack** is an enterprise workforce management, attendance tracking, and leave administration ecosystem built for **Skypass Visa Services**. It provides real-time GPS/geofenced mobile clock-ins, intelligent break timers with persistent tracking across device reboots, comprehensive leave workflows with statutory entitlement balancing, and a unified web platform that serves both company administrators and employees.
 
 ```
                            ┌────────────────────────────────────────────────┐
                            │               SUPABASE CLOUD                   │
-                           │  - PostgreSQL (RLS, Triggers, Views)           │
+                           │  - PostgreSQL (RLS, Triggers, Foreign Keys)    │
                            │  - Supabase Auth (JWT, Passwords, RBAC)        │
                            │  - Supabase Storage (Profile Photos)           │
                            └───────────────────────┬────────────────────────┘
@@ -24,38 +24,122 @@
                            │      EDGE FUNCTION: `skytrack-api`             │
                            │  (Single-Endpoint Action Router)               │
                            │  POST /functions/v1/skytrack-api               │
+                           │  Runs with Admin Service Role (Bypasses RLS)   │
                            └───────────────▲────────────────▲───────────────┘
                                            │                │
                         Bearer JWT / Actions│                │ Bearer JWT / Actions
                                            │                │
             ┌──────────────────────────────┴───┐        ┌───┴──────────────────────────────┐
-            │          ANDROID APP             │        │        ADMIN WEB PORTAL          │
-            │        (`SkyTrack_01`)           │        │       (`skytrack-admin`)         │
+            │          ANDROID APP             │        │          WEB APPLICATION         │
+            │        (`SkyTrack_01`)           │        │        (`skytrack-admin`)        │
             │  - Jetpack Compose + Material 3  │        │  - React 19 + TypeScript         │
             │  - Kotlin Coroutines & Flows     │        │  - Tailwind CSS v4 + Lucide      │
             │  - Dagger Hilt + Retrofit 2      │        │  - Vite Dev & Rolldown Build     │
-            │  - GPS Geofence & Persistent     │        │  - Real-time Dashboards, Audits, │
-            │    Break Elapsed Timers          │        │    Leave Approvals & 2FA Admin   │
+            │  - GPS Geofencing                │        │  - Dual-Portal Architecture:     │
+            │  - Persistent Break Timers       │        │    1. Admin Command Center       │
+            │  - Leave Request & Balance View  │        │    2. Employee Web Portal        │
             └──────────────────────────────────┘        └──────────────────────────────────┘
 ```
 
 ---
 
-## 2. Android Mobile Application (`SkyTrack_01`)
+## 2. Web Application (`skytrack-admin`)
+
+The web application is located at `/Volumes/Excelsior/SkyTrack/skytrack-admin`. It is a modern React 19 SPA running with Vite on port `5173`. It features a **Dual-Portal Architecture**:
+1. **Admin Command Center** (`/`, `/admin/*`): For HR, managers, and system administrators.
+2. **Employee Web Portal** (`/employee/*`): For regular employees to access their attendance, clock-in/out, view leaves, balances, reporting managers, and holidays from desktop browsers with UI parity to the mobile app.
 
 ### 2.1. Tech Stack & Dependencies
+- **Framework**: React 19 + TypeScript
+- **Bundler & Tooling**: Vite with Rolldown compiler
+- **Styling**: Tailwind CSS v4 (`@tailwindcss/vite`)
+- **Icons & Typography**: `lucide-react`, Google Fonts (*Plus Jakarta Sans*, *Inter*)
+- **Routing & State**: React Context (`AuthContext.tsx`), client-side tab & path routing, role guards (`ProtectedRoute.tsx`)
+- **Backend Client**: Supabase JS SDK (`@supabase/supabase-js`) & consolidated API layer (`api.ts`)
+
+### 2.2. Directory & Component Structure
+```
+skytrack-admin/
+├── src/
+│   ├── App.tsx                     # Main router; dispatches to Admin Layout, Employee Layout, or Login
+│   ├── main.tsx                    # React entry point wrapped with AuthProvider
+│   ├── contexts/
+│   │   └── AuthContext.tsx         # Session persistence, auto-login, role resolution (admin vs employee)
+│   ├── components/
+│   │   ├── Login.tsx               # Universal login screen; redirects admins to / and employees to /employee
+│   │   ├── ProtectedRoute.tsx      # Role guard (verifies admin vs employee clearance)
+│   │   │
+│   │   ├── # --- ADMIN COMMAND CENTER COMPONENTS ---
+│   │   ├── Sidebar.tsx             # Glassmorphic sidebar with badge counters and active tabs
+│   │   ├── Header.tsx              # Admin avatar, live date/time, global search (⌘K)
+│   │   ├── Dashboard.tsx           # Real-time workforce metrics, On Break counts, today's roster
+│   │   ├── Attendance.tsx          # Master attendance ledger, On Break tab, audit panel, check-out undo
+│   │   ├── Employees.tsx           # Workforce directory, filter pills, quick employee add
+│   │   ├── EmployeeDetails.tsx     # Full profile, history, edit modal, reporting manager assignment, 2FA password change
+│   │   ├── LeaveManagement.tsx     # Leave approval/rejection queue with manager comments & balance validation
+│   │   ├── PublicHolidays.tsx      # Unrestricted public holiday roster: declare, edit, delete any holiday, CSV export
+│   │   ├── Settings.tsx            # Admin profile and credentials management
+│   │   │
+│   │   └── # --- EMPLOYEE WEB PORTAL COMPONENTS (/employee/*) ---
+│   │       └── employee/
+│   │           ├── EmployeeSidebar.tsx  # Employee navigation (Home, Leaves, Monthly, Holidays, Profile)
+│   │           ├── EmployeeHeader.tsx   # Employee banner with live clock, greeting, and profile chip
+│   │           ├── EmployeeHome.tsx     # Mobile-parity circular punch clock, live work timer, break controls
+│   │           ├── EmployeeLeaves.tsx   # Leave balances, application modal with disabled 0-balance leaves, manager name
+│   │           ├── EmployeeMonthly.tsx  # Monthly calendar, work hours calculation, punch audit log
+│   │           ├── EmployeeHolidays.tsx # Upcoming public and gazetted holidays list
+│   │           └── EmployeeProfile.tsx  # Employee profile details, designation, department, and reporting manager
+│   ├── lib/
+│   │   ├── api.ts                  # Consolidated API functions routing to the skytrack-api Edge Function
+│   │   └── supabase.ts             # Direct Supabase client configuration
+│   └── supabase/
+│       ├── migrations/             # SQL migrations for RLS, tables, and roles
+│       │   ├── 20260101000000_admin_roles.sql
+│       │   ├── 20260101000001_official_holidays.sql
+│       │   ├── 20260101000002_attendance_breaks.sql
+│       │   ├── 20260101000003_comprehensive_rls.sql
+│       │   ├── 20261006000000_seed_mandatory_holidays.sql
+│       │   └── 20261021000000_holiday_admin_policies.sql # Admin policies for public holidays
+│       └── functions/
+│           └── skytrack-api/
+│               └── index.ts        # Local mirror of the Supabase Edge Function (MUST match root edge_function.ts)
+```
+
+### 2.3. Key Features & Workflows
+1. **Dual-Role Universal Authentication**:
+   - Users sign in with their `employee_id` (e.g. `SKY001`) or `email` and password in [Login.tsx](file:///Volumes/Excelsior/SkyTrack/skytrack-admin/src/components/Login.tsx).
+   - [AuthContext.tsx](file:///Volumes/Excelsior/SkyTrack/skytrack-admin/src/contexts/AuthContext.tsx) inspects the employee's `role`. If `role` is `admin` or `super_admin`, they navigate to the Admin Dashboard (`/`). Otherwise, they are routed to the Employee Portal (`/employee`).
+2. **Employee Portal Parity with Mobile App**:
+   - **Circular Punch Clock**: Built in [EmployeeHome.tsx](file:///Volumes/Excelsior/SkyTrack/skytrack-admin/src/components/employee/EmployeeHome.tsx) with animated SVG rings reflecting today's completed hours, current status (Not Checked In, Working, On Break, Checked Out), and live elapsed break duration.
+   - **Leave Management**: [EmployeeLeaves.tsx](file:///Volumes/Excelsior/SkyTrack/skytrack-admin/src/components/employee/EmployeeLeaves.tsx) displays Casual, Sick, and LOP cards. In the leave request dialog, Casual and Sick options are automatically disabled if remaining balance is 0.
+   - **Reporting Manager Resolution**: Dynamically resolves and displays the assigned reporting manager's actual name rather than showing "Not Assigned" or raw UUIDs.
+3. **Admin Attendance & Break Audit**:
+   - [Dashboard.tsx](file:///Volumes/Excelsior/SkyTrack/skytrack-admin/src/components/Dashboard.tsx) and [Attendance.tsx](file:///Volumes/Excelsior/SkyTrack/skytrack-admin/src/components/Attendance.tsx) track employees currently "On Break" with pulsing amber indicators.
+   - **Undo Checkout**: Admins can reverse accidental checkouts with a single click, restoring active working status without wiping previous timestamps.
+   - **Manual Adjustments**: Admins can manually enter or override check-in/out timestamps.
+4. **Public Holidays Administration**:
+   - [PublicHolidays.tsx](file:///Volumes/Excelsior/SkyTrack/skytrack-admin/src/components/PublicHolidays.tsx) allows admins to **delete or edit any holiday** (both statutory gazetted and company-declared).
+   - Instant optimistic UI removal backed by the `delete_public_holiday` Edge Function action and `localStorage` exclusion tracking to guarantee deleted items never resurrect on page reloads.
+
+---
+
+## 3. Android Mobile Application (`SkyTrack_01`)
+
+The mobile client is located at `/Volumes/Excelsior/SkyTrack/SkyTrack_01`. It is a native Android application built for employee daily attendance and workforce operations.
+
+### 3.1. Tech Stack & Dependencies
 - **Language**: Kotlin 1.9+ (Target JVM: 11)
-- **UI Toolkit**: Jetpack Compose with Material 3 Design
+- **UI Framework**: Jetpack Compose with Material 3 Design
 - **Architecture**: Clean Architecture + MVVM (Model-View-ViewModel) with Unidirectional Data Flow (UDF)
 - **Dependency Injection**: Dagger Hilt (`@HiltViewModel`, `@AndroidEntryPoint`)
-- **Networking**: Retrofit 2, OkHttp 3, Moshi / Gson converter
-- **Local Storage**: Jetpack DataStore (`SessionDataStore.kt`)
-- **Location & Sensors**: Google Play Services Location (`FusedLocationProviderClient`)
-- **OTA Updates**: `GithubReleaseApi.kt` comparing SemVer tags with GitHub Releases
-- **SDK Versions**: `compileSdk = 36`, `targetSdk = 36`, `minSdk = 26`
+- **Networking**: Retrofit 2, OkHttp 3 with Bearer token interceptor, Moshi & Gson converters
+- **Local Persistence**: Jetpack DataStore (`SessionDataStore.kt`)
+- **Geofencing & Location**: Google Play Services Location (`FusedLocationProviderClient`)
+- **App Updates**: `GithubReleaseApi.kt` comparing version strings against GitHub Releases
+- **SDK Targets**: `compileSdk = 36`, `targetSdk = 36`, `minSdk = 26`
 - **Package Namespace**: `com.skypass.skytrack`
 
-### 2.2. Directory & Package Structure
+### 3.2. Directory & Package Structure
 ```
 SkyTrack_01/app/src/main/java/com/skypass/skytrack/
 ├── SkyTrackApplication.kt         # @HiltAndroidApp application entry point
@@ -66,11 +150,11 @@ SkyTrack_01/app/src/main/java/com/skypass/skytrack/
 │   └── RepositoryModule.kt
 ├── data/
 │   ├── local/
-│   │   ├── SessionDataStore.kt    # Token, employeeId, name, role, email persistence
+│   │   ├── SessionDataStore.kt    # Token, employeeId, name, role, email, reportingManager persistence
 │   │   └── ConnectivityObserver.kt# Live network state flow
 │   ├── remote/
-│   │   ├── SkyTrackApi.kt         # Retrofit interface for POST /skytrack-api
-│   │   ├── ApiModels.kt           # Request/response DTOs (AttendanceDto, LeaveDto, etc.)
+│   │   ├── SkyTrackApi.kt         # Retrofit interface for POST /functions/v1/skytrack-api
+│   │   ├── ApiModels.kt           # Request/response DTOs (AttendanceDto, LeaveDto, ProfileDto, etc.)
 │   │   ├── ApiErrorExtractor.kt   # Clean error message extraction from HTTP payloads
 │   │   └── GithubReleaseApi.kt    # In-app update check against GitHub releases
 │   └── repository/
@@ -84,26 +168,30 @@ SkyTrack_01/app/src/main/java/com/skypass/skytrack/
     ├── home/
     │   ├── HomeScreen.kt          # Circular punch clock, break controls, status indicator
     │   └── HomeViewModel.kt       # State machine, break timer, optimistic UI updates
-    ├── leave/                     # Leave application modal & balance inspector
+    ├── leave/
+    │   ├── LeaveScreen.kt         # Leave balance cards, history, dynamic reporting manager display
+    │   └── LeaveViewModel.kt      # Leave submission, balance checks, zero-balance disabling
     ├── monthly/                   # Monthly calendar with day punches & work hours
-    ├── profile/                   # Employee profile details & logout
+    ├── profile/
+    │   ├── ProfileScreen.kt       # Employee profile details & logout
+    │   └── ProfileViewModel.kt    # Resolves reporting manager, department, and joining date
     └── theme/                     # Compose Color, Type, and Shape definitions
 ```
 
-### 2.3. Attendance & Break State Machine
+### 3.3. Attendance & Break State Machine
 The mobile app maintains four distinct visual and functional states:
-1. **Not Checked In (State 1)**: Large circular button to "Punch In". Checks GPS geofencing against office radius.
-2. **Checked In / Working (State 2)**: Displays check-in timestamp and live work duration. Displays active "Punch Out" and "Take Break" buttons.
+1. **Not Checked In (State 1)**: Displays large circular punch button. Verifies GPS location within office radius.
+2. **Checked In / Working (State 2)**: Displays check-in time and live elapsed work duration. Provides "Punch Out" and "Take Break" buttons.
 3. **On Break (State 3)**:
-   - Displays amber break indicator and real-time break duration timer.
-   - Button changes to "Resume Work".
-   - "Punch Out" button is blocked with a safeguard ("Cannot end work while a break is active. Please end your break first").
-4. **Checked Out (State 4)**: Shows total hours worked and break duration for the day.
+   - Displays amber indicator and live break timer.
+   - Primary button toggles to "Resume Work".
+   - "Punch Out" is disabled with an explanatory safeguard: *"Cannot end work while a break is active. Please end your break first."*
+4. **Checked Out (State 4)**: Shows daily summary with total working hours and break duration.
 
-### 2.4. Critical Implementation: Persistent Break Timer
-> **Gotcha / Scenario**: If an employee starts a break and then closes the app, kills it from memory, or the phone turns off/reboots, the timer must NOT reset to 0:
-- When break is started, the server saves `break_started_at: "ISO_TIMESTAMP"`.
-- In `HomeViewModel.kt`, the break duration is calculated dynamically:
+### 3.4. Persistent Break Timer Implementation
+> **Critical Behavior**: If an employee takes a break and the app is terminated, killed by OS memory management, or the device is rebooted, the break timer **must NOT reset to 0**:
+- When a break starts, the backend sets `break_started_at = NOW()` (ISO-8601 timestamp).
+- When the mobile app fetches attendance or re-opens, `HomeViewModel.kt` calculates elapsed break duration dynamically:
   ```kotlin
   val breakStartInstant = parseInstantSafe(resolvedAttendance?.breakStartedAt)
   val elapsedBreak = if (breakStartInstant != null) {
@@ -111,150 +199,112 @@ The mobile app maintains four distinct visual and functional states:
   } else 0L
   val totalBreakSeconds = baseBreakSeconds + elapsedBreak
   ```
-- This guarantees absolute temporal accuracy regardless of device status.
-
----
-
-## 3. Admin Web Portal (`skytrack-admin`)
-
-### 3.1. Tech Stack & Dependencies
-- **Framework**: React 19 + TypeScript (~6.0) + Vite (with Rolldown/Vite 8 bundling)
-- **Styling**: Tailwind CSS v4 (`@tailwindcss/vite`, `@tailwindcss/postcss`)
-- **Icons & Typography**: `lucide-react`, Google Fonts (*Plus Jakarta Sans*, *Inter*)
-- **State Management & Routing**: React Context (`AuthContext.tsx`), client-side tab state navigation
-- **Backend Client**: `@supabase/supabase-js` v2.109+
-- **Dev Server**: Vite local server running on `http://localhost:5173` with proxy to Supabase functions
-
-### 3.2. Directory & Component Structure
-```
-skytrack-admin/
-├── src/
-│   ├── App.tsx                     # Main dashboard layout, active tab router, search bar
-│   ├── main.tsx                    # React root render with AuthProvider wrapper
-│   ├── contexts/
-│   │   └── AuthContext.tsx         # Admin login, session expiry, role checks
-│   ├── components/
-│   │   ├── Sidebar.tsx             # Glassmorphic sidebar with badge counts & live status
-│   │   ├── Header.tsx              # Admin avatar, live date/time, global search (⌘K)
-│   │   ├── Dashboard.tsx           # Real-time workforce metrics, On Break counts, today's roster
-│   │   ├── Attendance.tsx          # Master attendance ledger, On Break tab, audit panel
-│   │   ├── Employees.tsx           # Workforce directory, filter pills, quick employee add
-│   │   ├── EmployeeDetails.tsx     # Full profile, history, edit modal, 2FA password change
-│   │   ├── LeaveManagement.tsx     # Leave approval/rejection queue with manager notes
-│   │   ├── PublicHolidays.tsx      # 2026 Indian statutory holiday roster, CSV export
-│   │   ├── Settings.tsx            # Admin profile and credentials management
-│   │   └── ProtectedRoute.tsx      # RBAC protection guard for administrative clearance
-│   └── lib/
-│       ├── api.ts                  # Consolidated API functions & Supabase RPC callers
-│       └── supabase.ts             # Supabase client initialization
-└── supabase/
-    └── functions/
-        └── skytrack-api/
-            └── index.ts            # Local mirror of the Supabase Edge Function
-```
-
-### 3.3. Key Features & Administrative Capabilities
-1. **Real-Time Break Monitoring**:
-   - `Dashboard.tsx` shows dynamic break badges on the Present card (`X on break`).
-   - Attendance roster displays amber badge with pulsing dot for employees currently on break.
-   - `Attendance.tsx` includes a dedicated `On Break` filter tab and counter.
-   - **Focused Employee Audit Card**: Live "Currently On Break" banner showing exact break start time and live elapsed duration.
-2. **Accidental Check-out Reversal (`Undo Checkout`)**:
-   - If an employee accidentally punches out, admins can click "Undo Check Out" inside the Focused Employee Audit card.
-   - Clears `check_out` timestamp and restores employee to active working status without altering prior check-in or break logs.
-3. **Manual Check-In / Check-Out Overrides**:
-   - Admins can manually set or correct check-in and check-out timestamps directly from the audit drawer.
-4. **Super Admin 2FA Password Change**:
-   - Inside `EmployeeDetails.tsx`, super admins can change employee passwords.
-   - Requires 2FA verification (e.g., admin password or TOTP confirmation) before modifying credentials in Supabase Auth.
-5. **Leave Approval Engine**:
-   - Single-click approval / rejection with manager comments.
-   - Automatically computes paid vs Loss of Pay (LOP) days.
-   - Updates `employee_leave_balances` without violating Postgres check constraints.
+- This guarantees absolute temporal accuracy regardless of device restarts.
 
 ---
 
 ## 4. Backend & Supabase Edge Function (`skytrack-api`)
 
-The backend is exposed as a single consolidated Supabase Edge Function written in Deno TypeScript:
+All application endpoints are consolidated into a single Supabase Edge Function:
 - **Root Path**: `/Volumes/Excelsior/SkyTrack/edge_function.ts`
 - **Admin Mirror Path**: `/Volumes/Excelsior/SkyTrack/skytrack-admin/supabase/functions/skytrack-api/index.ts`
 - **Production Endpoint**: `POST https://cwtrrtbodqctntkpnjlv.supabase.co/functions/v1/skytrack-api`
 
-### 4.1. Core Database Tables & Constraints
+> [!IMPORTANT]
+> **The Dual Edge Function Rule**:
+> `/Volumes/Excelsior/SkyTrack/edge_function.ts` and `/Volumes/Excelsior/SkyTrack/skytrack-admin/supabase/functions/skytrack-api/index.ts` must **ALWAYS** remain 100% identical. Whenever you edit one, immediately sync the other!
+
+### 4.1. Core Database Schema & Constraints
 | Table Name | Key Columns | Critical Constraints & Notes |
 | :--- | :--- | :--- |
-| `employees` | `id` (UUID), `employee_id` (e.g. `SKY001`), `name`, `email`, `role`, `status`, `auth_user_id`, `department`, `designation` | `role` can be `employee`, `admin`, `super_admin`, `manager`. |
-| `attendance` | `id` (UUID), `employee_id` (UUID), `date` (DATE), `check_in` (TIMESTAMPTZ), `check_out` (TIMESTAMPTZ), `break_started_at` (TIMESTAMPTZ), `total_break_seconds` (INT) | Only one record per employee per day (`UNIQUE(employee_id, date)`). |
+| `employees` | `id` (UUID), `employee_id` (e.g. `SKY001`), `name`, `email`, `role`, `status`, `auth_user_id`, `department`, `designation`, `reporting_manager_id` | `role` can be `employee`, `admin`, `super_admin`, `manager`. |
+| `attendance` | `id` (UUID), `employee_id` (UUID), `date` (DATE), `check_in` (TIMESTAMPTZ), `check_out` (TIMESTAMPTZ), `break_started_at` (TIMESTAMPTZ), `total_break_seconds` (INT) | Enforces one record per employee per day (`UNIQUE(employee_id, date)`). |
 | `leaves` | `id` (UUID), `request_id` (VARCHAR), `employee_id` (UUID), `leave_type` (VARCHAR), `from_date` (DATE), `to_date` (DATE), `leave_days` (NUMERIC), `paid_leave_days` (NUMERIC), `lop_days` (NUMERIC), `status` (VARCHAR) | `status` IN (`pending`, `approved`, `rejected`, `cancelled`). |
-| `employee_leave_balances` | `id` (UUID), `employee_id` (UUID), `leave_type` (VARCHAR), `allocated_days` (NUMERIC), `used_days` (NUMERIC), `adjusted_days` (NUMERIC) | **CRITICAL CONSTRAINT**: `CHECK (leave_type IN ('casual', 'sick'))`. Do NOT insert `'lop'` or long strings here. |
-| `public_holidays` | `id` (UUID), `name`, `holiday_date` (DATE), `type` (`gazetted` \| `restricted`) | Company-declared holidays. |
-| `official_public_holidays` | `id` (UUID), `name`, `holiday_date` (DATE), `type` (`gazetted` \| `restricted`) | Statutory government holidays. |
+| `employee_leave_balances` | `id` (UUID), `employee_id` (UUID), `leave_type` (VARCHAR), `allocated_days` (NUMERIC), `used_days` (NUMERIC), `adjusted_days` (NUMERIC) | **CRITICAL CONSTRAINT**: `CHECK (leave_type IN ('casual', 'sick'))`. Do NOT insert `'lop'` or long text into this table. |
+| `public_holidays` | `id` (UUID), `holiday_code`, `holiday_name`, `holiday_date` (DATE), `holiday_type` (`gazetted` \| `restricted`), `status` | Company & statutory holiday calendar. Foreign key in `public_holiday_branches`. |
+| `public_holiday_branches` | `id` (UUID), `holiday_id` (UUID -> `public_holidays.id`), `branch_code` (TEXT) | Regional branch associations for declared holidays. |
+| `official_public_holidays` | `id` (UUID), `holiday_code`, `holiday_name`, `holiday_date` (DATE), `holiday_type` | Statutory gazetted holidays cache. |
 
 ### 4.2. Action Dispatcher Reference
 The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body:
 
-| Action Name | Target / User | Description & Key Parameters |
+| Action Name | Target Role | Description & Parameters |
 | :--- | :--- | :--- |
-| `login` | Public | Authenticates credentials (`employeeId`, `password`), returns JWT & session DTO. |
-| `attendance_today` | Employee | Returns today's attendance record, current break status, and total break time. |
-| `start_work` | Employee | Clocks in employee with current timestamp. |
-| `end_work` | Employee | Clocks out employee. Rejects if an active break is currently running. |
-| `start_break` | Employee | Sets `break_started_at = NOW()`. |
-| `resume_work` / `end_break` | Employee | Computes `elapsed = NOW() - break_started_at`, adds to `total_break_seconds`, clears `break_started_at`. |
-| `admin_undo_checkout` | Admin | Clears `check_out` timestamp for an employee's daily attendance record. |
-| `admin_manual_attendance` | Admin | Manually sets or overrides `check_in` and `check_out` times. |
-| `leave_submit` | Employee | Submits a leave request (`type`, `from`, `to`, `reason`, `is_half_day`). |
-| `approve_leave` | Admin | Approves leave (`requestId`, `managerComment`). Normalizes type to `casual`/`sick`/`lop`, updates balances safely. |
-| `reject_leave` | Admin | Rejects leave request and records rejection reason. |
-| `cancel_leave` | Employee | Cancels own pending leave request. |
-| `super_admin_change_employee_password` | Super Admin | Updates employee's auth password via Supabase Admin Auth API. |
-| `attendance_feed` / `attendance_punches` | Admin | Returns activity stream of punches and breaks for the dashboard. |
-| `attendance_monthly` | Employee/Admin | Aggregates daily punch records and hours worked for a given month/year. |
-| `public_holidays` | All | Returns merged official and company holiday schedule. |
+| `login` | Public | Authenticates credentials (`employeeId`, `password`), returns JWT session and employee details. |
+| `public_holidays` | Public / All | Returns merged official and company holidays schedule. |
+| `attendance_today` | Authenticated | Returns today's punch record, break status, and accumulated break duration. |
+| `start_work` | Authenticated | Clocks in employee with current timestamp. |
+| `end_work` | Authenticated | Clocks out employee. Rejects if an active break is currently running. |
+| `start_break` | Authenticated | Sets `break_started_at = NOW()`. |
+| `resume_work` / `end_break` | Authenticated | Calculates elapsed break time, adds to `total_break_seconds`, and clears `break_started_at`. |
+| `leave_submit` | Authenticated | Submits a leave application (`type`, `from`, `to`, `reason`, `is_half_day`). |
+| `leave_history` | Authenticated | Returns the employee's past leave applications and balance breakdown. |
+| `cancel_leave` | Authenticated | Cancels a pending leave request submitted by the employee. |
+| `get_profile` | Authenticated | Returns employee profile with dynamically resolved reporting manager details. |
+| `attendance_monthly` | Authenticated | Aggregates punch times and total hours for a specified month and year. |
+| `attendance_feed` / `attendance_punches` | Admin | Real-time audit stream of punch and break events for the admin dashboard. |
+| `admin_undo_checkout` | Admin | Restores an employee to active working state by nullifying the `check_out` timestamp. |
+| `admin_manual_attendance` | Admin | Manually enters or overrides `check_in` and `check_out` timestamps. |
+| `approve_leave` | Admin | Approves a leave request; calculates paid vs LOP days and updates `employee_leave_balances`. |
+| `reject_leave` | Admin | Rejects a leave request with manager feedback notes. |
+| `organization_data` | Admin | Returns list of employees, departments, and shifts for org-wide management. |
+| `update_employee_organization` | Admin | Updates employee department, shift, or reporting manager. |
+| `delete_public_holiday` | Admin | Deletes branch links and removes holiday from `public_holidays` and `official_public_holidays`. |
+| `save_public_holiday` | Admin | Creates or updates public holiday details and branch assignments using service role. |
+| `seed_public_holidays` | Admin | Populates default statutory Indian & Kerala public holidays into the database. |
+| `super_admin_change_employee_password` | Super Admin | Resets employee password in Supabase Auth via Admin Auth API. |
 
 ---
 
 ## 5. Critical Guidelines & Gotchas for AI Agents
 
 > [!IMPORTANT]
-> **The Dual Edge Function Rule**:
-> `/Volumes/Excelsior/SkyTrack/edge_function.ts` and `/Volumes/Excelsior/SkyTrack/skytrack-admin/supabase/functions/skytrack-api/index.ts` must **ALWAYS** remain 100% identical. Whenever you edit one, immediately sync the other!
+> **1. The Dual Edge Function Rule**:
+> `/Volumes/Excelsior/SkyTrack/edge_function.ts` and `/Volumes/Excelsior/SkyTrack/skytrack-admin/supabase/functions/skytrack-api/index.ts` must **ALWAYS** remain 100% identical. Whenever you modify one file, copy it to the other immediately and verify with `diff -u`.
 
 > [!WARNING]
-> **Leave Balance Check Constraint**:
-> In PostgreSQL, `employee_leave_balances` enforces:
+> **2. Leave Balance Check Constraint**:
+> In PostgreSQL, `employee_leave_balances` strictly enforces:
 > `CHECK (leave_type IN ('casual', 'sick'))`
-> - Never write `Casual Leave`, `Sick Leave`, or `Loss of Pay` directly into `employee_leave_balances`.
-> - Always normalize types using canonical lowercase keys: `'casual'`, `'sick'`, `'lop'`.
-> - Loss of Pay (`'lop'`) does NOT have a row in `employee_leave_balances`; it only updates `leaves.lop_days`.
+> - Never insert strings like `'Casual Leave'`, `'Sick Leave'`, or `'Loss of Pay'` into `employee_leave_balances`.
+> - Always normalize types using lowercase identifiers: `'casual'`, `'sick'`, `'lop'`.
+> - Loss of Pay (`'lop'`) has **no balance row**; LOP days are tracked only on the `leaves.lop_days` column.
+
+> [!CAUTION]
+> **3. Supabase Row-Level Security (RLS) & Mutations**:
+> Tables like `public_holidays`, `employees`, and `attendance` have RLS enabled. If a client attempts a direct `DELETE` or `INSERT` through the Supabase JS SDK with an anon or employee key, Postgres may silently ignore the delete (0 rows affected) or return a 401 error.
+> - **Always route admin mutations through the Edge Function** (`skytrack-api`), which uses `adminClient` (Service Role Key) to safely bypass RLS.
 
 > [!TIP]
-> **Break Elapsed Time Calculation**:
-> When querying if someone is on break:
-> - If `break_started_at IS NOT NULL` and `check_out IS NULL`, the employee is currently **On Break**.
-> - Live Break Seconds = `total_break_seconds + (NOW() - break_started_at)`.
-> - When resuming work: add the elapsed difference into `total_break_seconds` and set `break_started_at = NULL`.
+> **4. Public Holiday Deletion Flow**:
+> When an admin deletes a holiday:
+> - Delete associated foreign key records in `public_holiday_branches` first.
+> - Remove matching rows from `public_holidays` and `official_public_holidays`.
+> - Store deleted keys in `localStorage` (`skytrack_deleted_holiday_keys`) on the frontend to prevent client-side static fallbacks from resurrecting them on reload.
+
+> [!NOTE]
+> **5. Dynamic Reporting Manager Resolution**:
+> When an employee has `reporting_manager_id` assigned, always resolve the manager's actual name using `organization_data` or the profile lookup. Never display static fallback names (e.g., "John Doe") or "Not Assigned" when a manager ID exists.
 
 ---
 
-## 6. Development & Deployment Commands
+## 6. Common Development Commands
 
-### Admin Portal (`skytrack-admin`)
+### Web Portal (`skytrack-admin`)
 ```bash
-# Run local dev server (port 5173)
+# Start local dev server (port 5173)
 npm run dev
 
-# Run full TypeScript validation & production build
+# Run TypeScript check and production build
 npm run build
 
-# Push commits to remote
-git add . && git commit -m "your message" && git push origin main
+# Push changes to GitHub
+git add -A && git commit -m "your message" && git push origin main
 ```
 
-### Android App (`SkyTrack_01`)
+### Android Mobile App (`SkyTrack_01`)
 ```bash
-# Clean & assemble debug APK
+# Clean and assemble debug APK
 ./gradlew clean assembleDebug
 
 # Run unit tests
@@ -263,7 +313,7 @@ git add . && git commit -m "your message" && git push origin main
 
 ### Supabase Edge Function (`skytrack-api`)
 ```bash
-# Deploy updated edge function to Supabase
+# Deploy to Supabase Cloud via Supabase CLI
 supabase functions deploy skytrack-api
 
 # Or copy edge_function.ts directly into Supabase Cloud Console -> Edge Functions -> skytrack-api
