@@ -320,12 +320,165 @@ git add -A && git commit -m "your message" && git push origin main
 
 # Run unit tests
 ./gradlew test
+
+# Staging build: separate app id (com.skypass.skytrack.staging, "SkyTrack Staging") that talks to the
+# URL in the skytrackStagingApiUrl Gradle property. Installs next to the production app. See section 7.
+./gradlew installStaging
 ```
 
 ### Supabase Edge Function (`skytrack-api`)
 ```bash
 # Deploy to Supabase Cloud via Supabase CLI
+# WARNING: supabase/.temp/linked-project.json links this folder to PRODUCTION (cwtrrtbodqctntkpnjlv).
+# For any test deploy always pass --project-ref <STAGING_REF> explicitly (see section 7).
 supabase functions deploy skytrack-api
 
 # Or copy edge_function.ts directly into Supabase Cloud Console -> Edge Functions -> skytrack-api
 ```
+
+---
+
+## 7. Testing Office Geofencing Safely (Staging Plan)
+
+**Goal**: run and verify the `feature/office-geofencing` branches (both repos) end to end **without touching
+the production database, Edge Function, Cloudflare site, or the Android app employees have installed**.
+Production is only changed later, deliberately, by following [docs/OFFICE_GEOFENCING.md](docs/OFFICE_GEOFENCING.md#rollout-manual-steps).
+
+```
+  Production (untouched)                         Staging (everything under test)
+  ─────────────────────                          ───────────────────────────────
+  Supabase cwtrrtbodqctntkpnjlv                  New Supabase project <STAGING_REF>
+  Cloudflare site (main)                         Local web: npm run dev --mode staging
+  Android "SkyTrack" (com.skypass.skytrack)      Android "SkyTrack Staging" (…skytrack.staging)
+```
+
+### 7.1. Safety rules (read first)
+1. **Do not merge** `feature/office-geofencing` into `main` (web) or `development` / `main` (Android) until
+   staging sign-off. The Cloudflare site deploys from `main`.
+2. **The Supabase CLI in `skytrack-admin` is linked to PRODUCTION** (`supabase/.temp/linked-project.json`).
+   Never run `supabase db push`, `supabase functions deploy` or `supabase link` without an explicit
+   `--project-ref <STAGING_REF>` / staging `--db-url`. Re-read the ref before pressing Enter.
+3. **Do not paste the root `/Volumes/Excelsior/SkyTrack/edge_function.ts` into the production console.** It now
+   contains the geofencing version, which fails every attendance action on a database without the migration.
+   To redeploy the current production function, use the `main` version:
+   `git -C skytrack-admin show main:supabase/functions/skytrack-api/index.ts`.
+4. **Do not publish a GitHub Release** from the Android feature branch — the in-app update checker would offer it
+   to every employee.
+5. **Do not install a `debug` or `release` build of the feature branch on an employee's phone.** Those variants
+   use the production API and the production application id (they replace the real app). Use only the
+   `staging` variant.
+6. **Do not use a Cloudflare preview deploy** for testing: `worker.ts` proxies `/api/skytrack` to production.
+7. Never commit staging secrets. `.env.*` files are git-ignored; keep the Android URL in `~/.gradle/gradle.properties`.
+
+### 7.2. Create the staging backend
+1. **New Supabase project** (free tier is enough): Dashboard → New project, e.g. `skytrack-staging`. Note its
+   project ref `<STAGING_REF>`, the anon/publishable key, and the database connection string.
+2. **Copy the production schema (read-only, no data).** Production RPCs (`start_work`, `end_work`, `start_break`,
+   `resume_work`) are not in the repo, so they must come from a dump:
+   ```bash
+   brew install libpq   # provides pg_dump / psql (Docker-free)
+   export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
+   # Production connection string: Dashboard (production) → Connect → Session pooler. This is a READ of the schema only.
+   pg_dump "<PRODUCTION_DB_URL>" --schema-only --schema=public --no-owner --no-privileges -f ~/skytrack_prod_schema.sql
+   psql "<STAGING_DB_URL>" -v ON_ERROR_STOP=1 -f ~/skytrack_prod_schema.sql
+   ```
+   Keep `~/skytrack_prod_schema.sql` outside the repo.
+3. **Apply the new migration to staging only:**
+   ```bash
+   psql "<STAGING_DB_URL>" -v ON_ERROR_STOP=1 \
+     -f skytrack-admin/supabase/migrations/20261025000000_office_geofence.sql
+   ```
+   If it stops with `office_geofence migration requires existing function public.start_work(uuid)`, the production
+   RPC signature differs from what the migration expects — stop and review before going further.
+4. **Seed test accounts.** In staging: Authentication → Users → Add user (auto-confirm) for e.g.
+   `admin.test@…`, `emp1.test@…`, `emp2.test@…` with passwords. Then in the SQL editor (add any other NOT NULL
+   columns your `employees` table requires):
+   ```sql
+   INSERT INTO public.employees (employee_id, name, email, role, status) VALUES
+     ('TST-ADMIN', 'Test Admin', 'admin.test@example.com', 'admin', 'active'),
+     ('TST-001', 'Test Employee 1', 'emp1.test@example.com', 'employee', 'active'),
+     ('TST-002', 'Test Employee 2', 'emp2.test@example.com', 'employee', 'active');
+   ```
+   `auth_user_id` is linked automatically on first login (matched by email).
+5. **Deploy the Edge Function to staging** (from `skytrack-admin` on the feature branch):
+   ```bash
+   cd skytrack-admin && git checkout feature/office-geofencing
+   diff -u ../edge_function.ts supabase/functions/skytrack-api/index.ts   # must print nothing
+   npx supabase@latest functions deploy skytrack-api --project-ref <STAGING_REF> --no-verify-jwt
+   ```
+   `--no-verify-jwt` matches production (the `login` action is called without a user JWT). Double-check the
+   output names `<STAGING_REF>`, not `cwtrrtbodqctntkpnjlv`.
+
+### 7.3. Run the web app against staging (local only)
+Create `skytrack-admin/.env.staging.local` (git-ignored):
+```bash
+VITE_SUPABASE_URL=https://<STAGING_REF>.supabase.co
+VITE_SUPABASE_ANON_KEY=<STAGING_ANON_KEY>
+VITE_SKYTRACK_API_URL=/api/skytrack
+# Points the local /api/skytrack dev proxy at staging (vite.config.ts; default is production)
+SKYTRACK_PROXY_TARGET=https://<STAGING_REF>.supabase.co/functions/v1/skytrack-api
+```
+```bash
+npm run dev -- --mode staging      # http://localhost:5173 (localhost counts as HTTPS for geolocation)
+```
+**Verify before testing**: DevTools → Network: every `api/skytrack` / `functions/v1` / `auth/v1` request must go
+to `localhost:5173` or `<STAGING_REF>.supabase.co`, never `cwtrrtbodqctntkpnjlv`. All four variables are needed:
+the API client falls back to `/api/skytrack` and the Supabase client uses `VITE_SUPABASE_URL`.
+
+Simulate locations in Chrome: DevTools → ⋮ → More tools → **Sensors** → Location → custom latitude/longitude.
+
+### 7.4. Run the Android app against staging (side by side with production)
+```bash
+# ~/.gradle/gradle.properties (not committed)
+skytrackStagingApiUrl=https://<STAGING_REF>.supabase.co/functions/v1/skytrack-api
+```
+```bash
+cd SkyTrack_01 && git checkout feature/office-geofencing   # stash local WIP first if needed
+./gradlew testStagingUnitTest installStaging
+```
+This installs **"SkyTrack Staging"** (`com.skypass.skytrack.staging`, version `1.0.0-staging`) next to the
+production app; it cannot overwrite or log out the real app. Prefer the emulator first:
+Extended controls (⋯) → **Location** → set a point → Send. On a physical test phone, walk in and out of the radius.
+If the update checker offers the production release inside the staging app, dismiss it.
+
+### 7.5. Test checklist (record pass/fail)
+| # | Area | Steps | Expected |
+| :-- | :--- | :--- | :--- |
+| 1 | Missing config | Before saving any settings, check in (web & Android) | Rejected (409): "office location has not been configured"; no attendance row created |
+| 2 | Admin access | Log in as `TST-001`, open `/office-geofence` URL; call `admin_save_geofence_settings` via curl with employee token | Employee lands in employee portal; API returns 403 `forbidden` |
+| 3 | Validation | As admin enter lat 91, lng 200, radius 5 / 5001 / 100.5, accuracy 1000, 0,0 | Inline errors; nothing saved. Same values via curl → 400 `invalid_geofence_settings` |
+| 4 | Save & reload | Save office coords, radius 100; reload page | Values, ACTIVE badge, "Changed by Test Admin", time and history row shown |
+| 5 | Inside | Simulate ~40 m from office; check in | Card "You appear to be at the office"; check-in succeeds |
+| 6 | Outside | Simulate ~150 m; check out | Rejected "about 150 m … 100 m radius"; still checked in |
+| 7 | Radius change, no app update | Admin sets radius 200; retry the same 150 m checkout | Succeeds without reinstalling or rebuilding |
+| 8 | Location change | Admin moves office 1 km; check in from old spot, then new spot | Old spot rejected (~1000 m), new spot accepted |
+| 9 | Inactive | Admin unticks Geofence active | Check-in/out rejected "disabled by your administrator"; breaks still work |
+| 10 | Breaks outside | Check in inside, move 2 km, start & resume break | Both succeed; rows in `attendance_location_events` with `geofence_enforced = false` and coordinates |
+| 11 | Break rules kept | Start break, try to check out | Existing "end your break first" message |
+| 12 | Permission denied | Android: deny permission at check-in; web: block location for the site | Clear message; Android card shows Allow / App settings |
+| 13 | Location off | Android: turn off location services | Card "Location services are off" + Turn on location |
+| 14 | Poor accuracy / stale | Emulator: low-accuracy fix, or admin sets max accuracy 5 m | "Location accuracy is low" (card) and server rejection `location_accuracy_too_low` |
+| 15 | Mock location | Physical phone with a mock-location app | Check-in rejected `mock_location_detected` |
+| 16 | Offline | Airplane mode, tap check-in; then start a break | Check-in: "needs an internet connection"; break queued and synced when back online |
+| 17 | Timeout | Emulator with no location sent, indoors device | "Couldn't get your location in time" + Retry |
+| 18 | Duplicate / concurrent | Double-tap check-in; check in on web and Android at the same moment | Exactly one check-in; second gets the existing "already started" error |
+| 19 | Direct bypass | `curl https://<STAGING_REF>.supabase.co/rest/v1/rpc/start_work` with anon key + employee JWT; try `UPDATE office_geofence_settings` via REST | `permission denied` / 401–403; settings unchanged |
+| 20 | Old clients | Call `start_work` without `location` (simulates current production app) | 422 `location_required` "please update the app" |
+| 21 | Regression | Admin manual attendance, undo checkout, dashboard On Break count, monthly summary, leave flows, break timer after app kill | Unchanged behaviour |
+
+Useful staging queries:
+```sql
+SELECT action, outcome, reason_code, location_status, round(distance_m) AS m, accuracy_m, received_at
+FROM attendance_location_events ORDER BY received_at DESC LIMIT 20;
+SELECT * FROM office_geofence_settings_history ORDER BY changed_at DESC;
+```
+
+### 7.6. After staging sign-off
+1. Open PRs from `feature/office-geofencing` (do not merge yet) for review.
+2. Production rollout order and the brief "blocked until configured" window are in
+   [docs/OFFICE_GEOFENCING.md → Rollout](docs/OFFICE_GEOFENCING.md#rollout-manual-steps). Ship web + Android first
+   (they work against the current backend), then migration, Edge Function, and configure the office immediately.
+3. **Rollback**: redeploy the `main` version of the Edge Function (rule 3 above). The migration is additive; the old
+   function uses the service role, so it keeps working with the new tables and revoked RPC grants in place.
+4. **Cleanup**: delete or pause the staging project, remove `.env.staging.local`, the `skytrackStagingApiUrl`
+   property, the schema dump, and uninstall "SkyTrack Staging".

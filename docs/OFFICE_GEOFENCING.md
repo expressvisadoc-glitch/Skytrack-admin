@@ -92,6 +92,9 @@ not used for location errors because the web client treats them as session expir
 
 ## Rollout (manual steps)
 
+Test everything on a staging project first: see the staging plan in
+[PROJECT_CONTEXT.md §7](../PROJECT_CONTEXT.md#7-testing-office-geofencing-safely-staging-plan).
+
 1. Release the Android app and web portal first. They send `location` but work against the current backend,
    which ignores it.
 2. Apply the migration (`supabase db push` or SQL editor). It aborts if `public.start_work(uuid)`,
