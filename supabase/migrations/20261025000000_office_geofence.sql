@@ -322,13 +322,15 @@ BEGIN
     v_outcome := 'rejected';
   END IF;
 
+  -- The existing RPCs return attendance_date (not id) and date rows with current_date,
+  -- so link the event the same way.
   IF v_attendance ? 'id' THEN
     v_attendance_id := (v_attendance->>'id')::UUID;
   ELSE
     SELECT a.id INTO v_attendance_id
     FROM public.attendance a
     WHERE a.employee_id = p_employee_id
-      AND a.attendance_date = (v_received_at AT TIME ZONE 'Asia/Kolkata')::DATE;
+      AND a.attendance_date = COALESCE((v_attendance->>'attendance_date')::DATE, current_date);
   END IF;
 
   INSERT INTO public.attendance_location_events (
