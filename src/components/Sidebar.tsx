@@ -27,6 +27,7 @@ export function Sidebar({ activeTab, onSelectTab, isOpen, onClose }: SidebarProp
     { id: 'public-holidays', label: 'Public Holidays', icon: 'event_available' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
     { id: 'organization', label: 'Organization', icon: 'corporate_fare' },
+    { id: 'office-geofence', label: 'Office Geofence', icon: 'location_on' },
     ...(isSuperAdmin ? [{ id: 'admin-management', label: 'Admin Management', icon: 'admin_panel_settings' }] : []),
   ]
 

@@ -4,6 +4,7 @@
  */
 
 import { supabase } from './supabase'
+import type { AttendanceLocationPayload } from './geolocation'
 
 const SUPABASE_BASE_URL =
   import.meta.env.VITE_SUPABASE_URL || 'https://cwtrrtbodqctntkpnjlv.supabase.co'
@@ -3071,43 +3072,114 @@ export async function getEmployeeTodayAttendance(token: string): Promise<{
   })
 }
 
-export async function startWork(token: string): Promise<{
+export async function startWork(token: string, location?: AttendanceLocationPayload | null): Promise<{
   success: boolean
   message?: string
   attendance?: any
 }> {
   return fetchSkyTrackApi(token, {
     action: 'start_work',
+    ...(location ? { location } : {}),
   })
 }
 
-export async function endWork(token: string): Promise<{
+export async function endWork(token: string, location?: AttendanceLocationPayload | null): Promise<{
   success: boolean
   message?: string
   attendance?: any
 }> {
   return fetchSkyTrackApi(token, {
     action: 'end_work',
+    ...(location ? { location } : {}),
   })
 }
 
-export async function startBreak(token: string): Promise<{
+export async function startBreak(token: string, location?: AttendanceLocationPayload | null): Promise<{
   success: boolean
   message?: string
   attendance?: any
 }> {
   return fetchSkyTrackApi(token, {
     action: 'start_break',
+    ...(location ? { location } : {}),
   })
 }
 
-export async function resumeWork(token: string): Promise<{
+export async function resumeWork(token: string, location?: AttendanceLocationPayload | null): Promise<{
   success: boolean
   message?: string
   attendance?: any
 }> {
   return fetchSkyTrackApi(token, {
     action: 'resume_work',
+    ...(location ? { location } : {}),
+  })
+}
+
+// =========================================================
+// OFFICE GEOFENCE (ADMIN)
+// =========================================================
+
+export interface GeofenceAdminRef {
+  id: string
+  employeeId: string | null
+  name: string | null
+}
+
+export interface GeofenceSettings {
+  configured: boolean
+  isActive: boolean
+  officeName: string | null
+  latitude: number | null
+  longitude: number | null
+  radiusMeters: number
+  maxAccuracyMeters: number
+  maxLocationAgeSeconds: number
+  updatedAt: string | null
+  updatedBy: GeofenceAdminRef | null
+}
+
+export interface GeofenceHistoryEntry {
+  id: string
+  officeName: string | null
+  latitude: number
+  longitude: number
+  radiusMeters: number
+  isActive: boolean
+  maxAccuracyMeters: number
+  maxLocationAgeSeconds: number
+  changedAt: string
+  changedBy: GeofenceAdminRef | null
+}
+
+export interface GeofenceSettingsInput {
+  officeName: string | null
+  latitude: number
+  longitude: number
+  radiusMeters: number
+  isActive: boolean
+  maxAccuracyMeters: number
+  maxLocationAgeSeconds: number
+}
+
+export async function getGeofenceSettings(token: string): Promise<{
+  success: boolean
+  settings: GeofenceSettings
+  history: GeofenceHistoryEntry[]
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_geofence_settings',
+  })
+}
+
+export async function saveGeofenceSettings(token: string, settings: GeofenceSettingsInput): Promise<{
+  success: boolean
+  message?: string
+  settings: GeofenceSettings
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_save_geofence_settings',
+    ...settings,
   })
 }
 

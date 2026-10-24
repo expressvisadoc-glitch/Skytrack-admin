@@ -395,19 +395,35 @@ async function handleRequest(req: Request): Promise<Response> {
     }
 
     if (action === "start_work") {
-      return await handleStartWork(employee);
+      return await handleStartWork(employee, body);
     }
 
     if (action === "end_work") {
-      return await handleEndWork(employee);
+      return await handleEndWork(employee, body);
     }
 
     if (action === "start_break") {
-      return await handleStartBreak(employee);
+      return await handleStartBreak(employee, body);
     }
 
     if (action === "resume_work" || action === "end_break") {
-      return await handleResumeWork(employee);
+      return await handleResumeWork(employee, body);
+    }
+
+    // =========================================================
+    // OFFICE GEOFENCE
+    // =========================================================
+
+    if (action === "geofence_config") {
+      return await handleGeofenceConfig();
+    }
+
+    if (action === "admin_geofence_settings") {
+      return await handleAdminGeofenceSettings(employee);
+    }
+
+    if (action === "admin_save_geofence_settings") {
+      return await handleAdminSaveGeofenceSettings(employee, body);
     }
 
     if (action === "attendance_monthly") {
@@ -998,18 +1014,22 @@ async function handleAttendanceToday(
 // =============================================================
 
 async function handleStartWork(
-  employee: any
+  employee: any,
+  body: any
 ) {
   const {
     data,
-    error
-  } = await adminClient.rpc(
+    error,
+    rejection
+  } = await callAttendanceActionRpc(
+    employee,
     "start_work",
-    {
-      p_employee_id:
-        employee.id
-    }
+    body
   );
+
+  if (rejection) {
+    return rejection;
+  }
 
   if (error) {
     console.error(
@@ -1095,18 +1115,22 @@ async function handleStartWork(
 // =============================================================
 
 async function handleEndWork(
-  employee: any
+  employee: any,
+  body: any
 ) {
   const {
     data,
-    error
-  } = await adminClient.rpc(
+    error,
+    rejection
+  } = await callAttendanceActionRpc(
+    employee,
     "end_work",
-    {
-      p_employee_id:
-        employee.id
-    }
+    body
   );
+
+  if (rejection) {
+    return rejection;
+  }
 
   if (error) {
     console.error(
@@ -1207,18 +1231,22 @@ async function handleEndWork(
 // =============================================================
 
 async function handleStartBreak(
-  employee: any
+  employee: any,
+  body: any
 ) {
   const {
     data,
-    error
-  } = await adminClient.rpc(
+    error,
+    rejection
+  } = await callAttendanceActionRpc(
+    employee,
     "start_break",
-    {
-      p_employee_id:
-        employee.id
-    }
+    body
   );
+
+  if (rejection) {
+    return rejection;
+  }
 
   if (error) {
     console.error(
@@ -1284,18 +1312,22 @@ async function handleStartBreak(
 // =============================================================
 
 async function handleResumeWork(
-  employee: any
+  employee: any,
+  body: any
 ) {
   const {
     data,
-    error
-  } = await adminClient.rpc(
+    error,
+    rejection
+  } = await callAttendanceActionRpc(
+    employee,
     "resume_work",
-    {
-      p_employee_id:
-        employee.id
-    }
+    body
   );
+
+  if (rejection) {
+    return rejection;
+  }
 
   if (error) {
     console.error(
@@ -1352,6 +1384,471 @@ async function handleResumeWork(
 
       status:
         attendance.status
+    }
+  });
+}
+
+// =============================================================
+// OFFICE GEOFENCE
+// The office location, radius and accuracy policy live in public.office_geofence_settings
+// and are read by public.attendance_action_with_location inside the same transaction as
+// the attendance state change. Clients only ever submit their own location fix.
+// =============================================================
+
+const GEOFENCE_LIMITS = {
+  radiusMeters: { min: 10, max: 5000, default: 100 },
+  maxAccuracyMeters: { min: 5, max: 500, default: 50 },
+  maxLocationAgeSeconds: { min: 10, max: 600, default: 120 },
+  officeNameMaxLength: 120
+};
+
+const GEOFENCE_CONFIG_ERRORS = new Set([
+  "geofence_not_configured",
+  "geofence_inactive"
+]);
+
+type AttendanceLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  capturedAt: string;
+  ageMs: number | null;
+  isMock: boolean | null;
+  platform: string | null;
+};
+
+function toFiniteNumber(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : NaN;
+  if (typeof value === "string" && /^\s*-?\d+(\.\d+)?\s*$/.test(value)) return Number(value);
+  return NaN;
+}
+
+function parseAttendanceLocation(body: any): { location: AttendanceLocation | null; invalid: boolean } {
+  const raw = body?.location;
+  if (raw === undefined || raw === null) {
+    return { location: null, invalid: false };
+  }
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { location: null, invalid: true };
+  }
+
+  const latitude = toFiniteNumber(raw.latitude ?? raw.lat);
+  const longitude = toFiniteNumber(raw.longitude ?? raw.lng ?? raw.lon);
+  const accuracy = toFiniteNumber(raw.accuracy ?? raw.accuracyMeters ?? raw.accuracy_m);
+
+  const rawCapturedAt = raw.capturedAt ?? raw.captured_at ?? raw.timestamp;
+  const capturedMs = typeof rawCapturedAt === "number"
+    ? rawCapturedAt
+    : typeof rawCapturedAt === "string"
+      ? Date.parse(rawCapturedAt)
+      : NaN;
+
+  const rawAge = raw.ageMs ?? raw.age_ms;
+  const ageMs = rawAge === undefined || rawAge === null ? null : toFiniteNumber(rawAge);
+  const rawMock = raw.isMock ?? raw.is_mock;
+  const platform = typeof raw.platform === "string"
+    ? raw.platform.toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 20) || null
+    : null;
+
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    !Number.isFinite(accuracy) ||
+    !Number.isFinite(capturedMs) ||
+    (ageMs !== null && !Number.isFinite(ageMs)) ||
+    (rawMock !== undefined && rawMock !== null && typeof rawMock !== "boolean")
+  ) {
+    return { location: null, invalid: true };
+  }
+
+  return {
+    location: {
+      latitude,
+      longitude,
+      accuracy,
+      capturedAt: new Date(capturedMs).toISOString(),
+      ageMs: ageMs === null ? null : Math.round(ageMs),
+      isMock: typeof rawMock === "boolean" ? rawMock : null,
+      platform
+    },
+    invalid: false
+  };
+}
+
+function geofenceRejectionMessage(action: string, code: string, result: any): string {
+  const verb = action === "end_work" ? "check out" : "check in";
+  const distance = Number(result?.distance_m);
+  const radius = Number(result?.radius_m);
+  const accuracy = Number(result?.accuracy_m);
+  const maxAccuracy = Number(result?.max_accuracy_m);
+  const maxAge = Number(result?.max_location_age_s);
+
+  switch (code) {
+    case "geofence_not_configured":
+      return `The office location has not been configured, so you cannot ${verb} right now. Please contact your administrator.`;
+    case "geofence_inactive":
+      return `Office location verification is currently disabled by your administrator, so you cannot ${verb} right now. Please contact your administrator.`;
+    case "location_required":
+      return `Your current location is required to ${verb}. Please allow location access and try again. If you are using an older version of SkyTrack, please update the app.`;
+    case "invalid_location":
+      return `The location received from your device is invalid. Please refresh your location and try again.`;
+    case "location_timestamp_invalid":
+      return `Your location reading has a timestamp ahead of the server time. Make sure your device date and time are set automatically, then try again.`;
+    case "location_stale":
+      return `Your location reading is out of date (older than ${Number.isFinite(maxAge) ? maxAge : 120} seconds). Please refresh your location and try again.`;
+    case "location_accuracy_too_low":
+      return `Your location accuracy${Number.isFinite(accuracy) ? ` (±${Math.round(accuracy)} m)` : ""} is too low to ${verb}; ±${Number.isFinite(maxAccuracy) ? maxAccuracy : 50} m or better is required. Move near a window or outdoors, turn on Wi-Fi, and try again.`;
+    case "mock_location_detected":
+      return `A simulated (mock) location was detected. Disable any mock location apps and try again.`;
+    case "outside_geofence":
+      return `You are about ${Number.isFinite(distance) ? Math.round(distance) : "?"} m from the office, outside the permitted ${Number.isFinite(radius) ? radius : "?"} m radius. Move closer to the office and try again.`;
+    default:
+      return `Unable to verify your location to ${verb}. Please try again.`;
+  }
+}
+
+function geofenceRejectionResponse(action: string, code: string, result: any): Response {
+  return json(
+    {
+      success: false,
+      error: code,
+      message: geofenceRejectionMessage(action, code, result),
+      geofence: {
+        locationStatus: result?.location_status ?? null,
+        distanceMeters: result?.distance_m === null || result?.distance_m === undefined
+          ? null
+          : Math.round(Number(result.distance_m)),
+        radiusMeters: result?.radius_m ?? null,
+        accuracyMeters: result?.accuracy_m ?? null,
+        maxAccuracyMeters: result?.max_accuracy_m ?? null,
+        maxLocationAgeSeconds: result?.max_location_age_s ?? null,
+        receivedAt: result?.received_at ?? null
+      }
+    },
+    GEOFENCE_CONFIG_ERRORS.has(code) ? 409 : 422
+  );
+}
+
+/**
+ * Runs an attendance action through public.attendance_action_with_location, which enforces the
+ * office geofence for start_work / end_work, records location evidence for every action and calls
+ * the existing attendance RPC in the same transaction. Returns the attendance row in the same
+ * `data` array shape the existing RPCs returned, or a ready-made `rejection` response.
+ */
+async function callAttendanceActionRpc(
+  employee: any,
+  action: "start_work" | "end_work" | "start_break" | "resume_work",
+  body: any
+): Promise<{ data: any[] | null; error: any; rejection: Response | null }> {
+  const enforced = action === "start_work" || action === "end_work";
+  const { location, invalid } = parseAttendanceLocation(body);
+
+  if (invalid && enforced) {
+    return {
+      data: null,
+      error: null,
+      rejection: geofenceRejectionResponse(action, "invalid_location", null)
+    };
+  }
+
+  const { data, error } = await adminClient.rpc(
+    "attendance_action_with_location",
+    {
+      p_employee_id: employee.id,
+      p_action: action,
+      p_latitude: location?.latitude ?? null,
+      p_longitude: location?.longitude ?? null,
+      p_accuracy_m: location?.accuracy ?? null,
+      p_captured_at: location?.capturedAt ?? null,
+      p_location_age_ms: location?.ageMs ?? null,
+      p_is_mock: location?.isMock ?? null,
+      p_client_platform: location?.platform ?? null
+    }
+  );
+
+  if (error) {
+    return { data: null, error, rejection: null };
+  }
+
+  if (!data?.ok) {
+    return {
+      data: null,
+      error: null,
+      rejection: geofenceRejectionResponse(action, String(data?.error ?? "location_verification_failed"), data)
+    };
+  }
+
+  return {
+    data: data.attendance ? [data.attendance] : [],
+    error: null,
+    rejection: null
+  };
+}
+
+function formatGeofenceSettings(row: any) {
+  if (!row) {
+    return {
+      configured: false,
+      isActive: false,
+      officeName: null,
+      latitude: null,
+      longitude: null,
+      radiusMeters: GEOFENCE_LIMITS.radiusMeters.default,
+      maxAccuracyMeters: GEOFENCE_LIMITS.maxAccuracyMeters.default,
+      maxLocationAgeSeconds: GEOFENCE_LIMITS.maxLocationAgeSeconds.default,
+      updatedAt: null
+    };
+  }
+
+  return {
+    configured: true,
+    isActive: row.is_active === true,
+    officeName: row.office_name ?? null,
+    latitude: Number(row.latitude),
+    longitude: Number(row.longitude),
+    radiusMeters: Number(row.radius_m),
+    maxAccuracyMeters: Number(row.max_accuracy_m),
+    maxLocationAgeSeconds: Number(row.max_location_age_s),
+    updatedAt: row.updated_at ?? null
+  };
+}
+
+async function fetchGeofenceSettingsRow() {
+  return await adminClient
+    .from("office_geofence_settings")
+    .select("*")
+    .eq("id", 1)
+    .maybeSingle();
+}
+
+// Employee-facing: used by the Android app for in-app guidance only.
+// The backend re-reads the settings for every check-in / check-out.
+async function handleGeofenceConfig(): Promise<Response> {
+  const { data, error } = await fetchGeofenceSettingsRow();
+
+  if (error) {
+    console.error("geofence_config error:", error);
+    return json({
+      success: false,
+      error: "database_error",
+      message: "Unable to load the office location settings."
+    }, 500);
+  }
+
+  const settings = formatGeofenceSettings(data);
+  return json({
+    success: true,
+    geofence: {
+      configured: settings.configured,
+      active: settings.isActive,
+      officeName: settings.officeName,
+      latitude: settings.latitude,
+      longitude: settings.longitude,
+      radiusMeters: settings.radiusMeters,
+      maxAccuracyMeters: settings.maxAccuracyMeters,
+      maxLocationAgeSeconds: settings.maxLocationAgeSeconds,
+      updatedAt: settings.updatedAt
+    }
+  });
+}
+
+function geofenceForbiddenResponse(): Response {
+  return json({
+    success: false,
+    error: "forbidden",
+    message: "Only administrators can manage office geofence settings."
+  }, 403);
+}
+
+function isAdminRole(employee: any): boolean {
+  const role = String(employee?.role || "").toLowerCase();
+  return role === "admin" || role === "super_admin";
+}
+
+async function handleAdminGeofenceSettings(employee: any): Promise<Response> {
+  if (!isAdminRole(employee)) {
+    return geofenceForbiddenResponse();
+  }
+
+  const { data, error } = await fetchGeofenceSettingsRow();
+  if (error) {
+    console.error("admin_geofence_settings error:", error);
+    return json({
+      success: false,
+      error: "database_error",
+      message: "Unable to load the office location settings."
+    }, 500);
+  }
+
+  const { data: historyRows, error: historyError } = await adminClient
+    .from("office_geofence_settings_history")
+    .select("*")
+    .order("changed_at", { ascending: false })
+    .limit(10);
+
+  if (historyError) {
+    console.error("admin_geofence_settings history error:", historyError);
+  }
+
+  const adminIds = Array.from(new Set(
+    [data?.updated_by, ...(historyRows ?? []).map((h: any) => h.changed_by)].filter(Boolean)
+  ));
+  const adminsById = new Map<string, any>();
+  if (adminIds.length > 0) {
+    const { data: admins } = await adminClient
+      .from("employees")
+      .select("id, employee_id, name")
+      .in("id", adminIds);
+    for (const admin of admins ?? []) {
+      adminsById.set(admin.id, admin);
+    }
+  }
+
+  const describeAdmin = (id: string | null | undefined) => {
+    if (!id) return null;
+    const admin = adminsById.get(id);
+    return {
+      id,
+      employeeId: admin?.employee_id ?? null,
+      name: admin?.name ?? null
+    };
+  };
+
+  return json({
+    success: true,
+    settings: {
+      ...formatGeofenceSettings(data),
+      updatedBy: describeAdmin(data?.updated_by)
+    },
+    history: (historyRows ?? []).map((h: any) => ({
+      id: h.id,
+      officeName: h.office_name ?? null,
+      latitude: Number(h.latitude),
+      longitude: Number(h.longitude),
+      radiusMeters: Number(h.radius_m),
+      isActive: h.is_active === true,
+      maxAccuracyMeters: Number(h.max_accuracy_m),
+      maxLocationAgeSeconds: Number(h.max_location_age_s),
+      changedAt: h.changed_at,
+      changedBy: describeAdmin(h.changed_by)
+    })),
+    limits: GEOFENCE_LIMITS
+  });
+}
+
+function validateGeofenceSettingsInput(body: any): { errors: string[]; value: any } {
+  const errors: string[] = [];
+  const input = body?.settings && typeof body.settings === "object" ? body.settings : body;
+
+  const latitude = toFiniteNumber(input?.latitude);
+  const longitude = toFiniteNumber(input?.longitude);
+  const radius = toFiniteNumber(input?.radiusMeters ?? input?.radius_m);
+  const maxAccuracy = toFiniteNumber(input?.maxAccuracyMeters ?? input?.max_accuracy_m ?? GEOFENCE_LIMITS.maxAccuracyMeters.default);
+  const maxAge = toFiniteNumber(input?.maxLocationAgeSeconds ?? input?.max_location_age_s ?? GEOFENCE_LIMITS.maxLocationAgeSeconds.default);
+  const isActive = input?.isActive ?? input?.is_active;
+  const officeName = input?.officeName ?? input?.office_name ?? null;
+
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    errors.push("Latitude must be a number between -90 and 90.");
+  }
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    errors.push("Longitude must be a number between -180 and 180.");
+  }
+  if (latitude === 0 && longitude === 0) {
+    errors.push("Latitude 0, longitude 0 is not a valid office location.");
+  }
+
+  const integerInRange = (value: number, label: string, unit: string, limits: { min: number; max: number }) => {
+    if (!Number.isInteger(value) || value < limits.min || value > limits.max) {
+      errors.push(`${label} must be a whole number between ${limits.min} and ${limits.max} ${unit}.`);
+    }
+  };
+  integerInRange(radius, "Radius", "metres", GEOFENCE_LIMITS.radiusMeters);
+  integerInRange(maxAccuracy, "Maximum location accuracy", "metres", GEOFENCE_LIMITS.maxAccuracyMeters);
+  integerInRange(maxAge, "Maximum location age", "seconds", GEOFENCE_LIMITS.maxLocationAgeSeconds);
+
+  if (typeof isActive !== "boolean") {
+    errors.push("Active status must be true or false.");
+  }
+  if (officeName !== null && typeof officeName !== "string") {
+    errors.push("Office name must be text.");
+  } else if (typeof officeName === "string" && officeName.trim().length > GEOFENCE_LIMITS.officeNameMaxLength) {
+    errors.push(`Office name must be at most ${GEOFENCE_LIMITS.officeNameMaxLength} characters.`);
+  }
+
+  return {
+    errors,
+    value: {
+      latitude,
+      longitude,
+      radius,
+      maxAccuracy,
+      maxAge,
+      isActive,
+      officeName: typeof officeName === "string" ? officeName.trim() : null
+    }
+  };
+}
+
+async function handleAdminSaveGeofenceSettings(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) {
+    return geofenceForbiddenResponse();
+  }
+
+  const { errors, value } = validateGeofenceSettingsInput(body);
+  if (errors.length > 0) {
+    return json({
+      success: false,
+      error: "invalid_geofence_settings",
+      message: errors.join(" "),
+      errors
+    }, 400);
+  }
+
+  const { data, error } = await adminClient.rpc(
+    "save_office_geofence_settings",
+    {
+      p_admin_id: employee.id,
+      p_office_name: value.officeName,
+      p_latitude: value.latitude,
+      p_longitude: value.longitude,
+      p_radius_m: value.radius,
+      p_is_active: value.isActive,
+      p_max_accuracy_m: value.maxAccuracy,
+      p_max_location_age_s: value.maxAge
+    }
+  );
+
+  if (error) {
+    console.error("admin_save_geofence_settings error:", error);
+    if (error.code === "42501") {
+      return geofenceForbiddenResponse();
+    }
+    if (error.code === "23514") {
+      return json({
+        success: false,
+        error: "invalid_geofence_settings",
+        message: "The office location settings are outside the allowed ranges."
+      }, 400);
+    }
+    return json({
+      success: false,
+      error: "database_error",
+      message: "Unable to save the office location settings."
+    }, 500);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return json({
+    success: true,
+    message: "Office location settings saved. They apply to all check-in and check-out attempts from now on.",
+    settings: {
+      ...formatGeofenceSettings(row),
+      updatedBy: {
+        id: employee.id,
+        employeeId: employee.employee_id ?? null,
+        name: employee.name ?? null
+      }
     }
   });
 }

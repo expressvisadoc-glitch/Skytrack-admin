@@ -9,6 +9,7 @@ import {
   type EmployeeTodayAttendance,
   isSessionExpiredError
 } from '../../lib/api'
+import { getBrowserLocation } from '../../lib/geolocation'
 import { 
   LogOut, 
   Coffee, 
@@ -132,7 +133,9 @@ export function EmployeeHome() {
     setSuccessMessage(null)
 
     try {
-      const res = await startWork(token)
+      // Check-in is verified against the office geofence on the server
+      const location = await getBrowserLocation()
+      const res = await startWork(token, location)
       if (res.success) {
         setSuccessMessage('Punch in recorded successfully! Welcome to work.')
         await loadAttendance(true)
@@ -168,7 +171,9 @@ export function EmployeeHome() {
     setSuccessMessage(null)
 
     try {
-      const res = await endWork(token)
+      // Check-out is verified against the office geofence on the server
+      const location = await getBrowserLocation()
+      const res = await endWork(token, location)
       if (res.success) {
         setSuccessMessage('Punch out recorded successfully! Have a great evening.')
         await loadAttendance(true)
@@ -193,7 +198,9 @@ export function EmployeeHome() {
     setSuccessMessage(null)
 
     try {
-      const res = await startBreak(token)
+      // Break location is recorded when available but never blocks the break
+      const location = await getBrowserLocation(10000).catch(() => null)
+      const res = await startBreak(token, location)
       if (res.success) {
         setSuccessMessage('Break started. Enjoy your break!')
         await loadAttendance(true)
@@ -218,7 +225,9 @@ export function EmployeeHome() {
     setSuccessMessage(null)
 
     try {
-      const res = await resumeWork(token)
+      // Break location is recorded when available but never blocks resuming
+      const location = await getBrowserLocation(10000).catch(() => null)
+      const res = await resumeWork(token, location)
       if (res.success) {
         setSuccessMessage('Work resumed successfully. Welcome back!')
         await loadAttendance(true)

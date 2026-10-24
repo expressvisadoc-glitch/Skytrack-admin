@@ -79,6 +79,7 @@ skytrack-admin/
 │   │   ├── LeaveManagement.tsx     # Leave approval/rejection queue with manager comments & balance validation
 │   │   ├── PublicHolidays.tsx      # Unrestricted public holiday roster: declare, edit, delete any holiday, CSV export
 │   │   ├── Settings.tsx            # Admin profile and credentials management
+│   │   ├── OfficeGeofence.tsx      # Office location, geofence radius & location-accuracy policy (admin only)
 │   │   │
 │   │   └── # --- EMPLOYEE WEB PORTAL COMPONENTS (/employee/*) ---
 │   │       └── employee/
@@ -99,7 +100,8 @@ skytrack-admin/
 │       │   ├── 20260101000002_attendance_breaks.sql
 │       │   ├── 20260101000003_comprehensive_rls.sql
 │       │   ├── 20261006000000_seed_mandatory_holidays.sql
-│       │   └── 20261021000000_holiday_admin_policies.sql # Admin policies for public holidays
+│       │   ├── 20261021000000_holiday_admin_policies.sql # Admin policies for public holidays
+│       │   └── 20261025000000_office_geofence.sql # Office geofence settings, location events, atomic attendance RPC
 │       └── functions/
 │           └── skytrack-api/
 │               └── index.ts        # Local mirror of the Supabase Edge Function (MUST match root edge_function.ts)
@@ -224,6 +226,9 @@ All application endpoints are consolidated into a single Supabase Edge Function:
 | `public_holidays` | `id` (UUID), `holiday_code`, `holiday_name`, `holiday_date` (DATE), `holiday_type` (`gazetted` \| `restricted`), `status` | Company & statutory holiday calendar. Foreign key in `public_holiday_branches`. |
 | `public_holiday_branches` | `id` (UUID), `holiday_id` (UUID -> `public_holidays.id`), `branch_code` (TEXT) | Regional branch associations for declared holidays. |
 | `official_public_holidays` | `id` (UUID), `holiday_code`, `holiday_name`, `holiday_date` (DATE), `holiday_type` | Statutory gazetted holidays cache. |
+| `office_geofence_settings` | `id` (=1), `latitude`, `longitude`, `radius_m`, `is_active`, `max_accuracy_m`, `max_location_age_s`, `updated_by`, `updated_at` | Single row. Written only via `save_office_geofence_settings` (service role). Admin-only `SELECT`. |
+| `office_geofence_settings_history` | `id`, settings snapshot, `changed_by`, `changed_at` | One row per admin save. |
+| `attendance_location_events` | `id`, `employee_id`, `attendance_id`, `action`, `outcome`, `reason_code`, `location_status`, coordinates, `accuracy_m`, `distance_m`, `received_at` | Location evidence for every attendance action. Employees see own rows, admins all; writes service role only. |
 
 ### 4.2. Action Dispatcher Reference
 The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body:
@@ -233,10 +238,11 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 | `login` | Public | Authenticates credentials (`employeeId`, `password`), returns JWT session and employee details. |
 | `public_holidays` | Public / All | Returns merged official and company holidays schedule. |
 | `attendance_today` | Authenticated | Returns today's punch record, break status, and accumulated break duration. |
-| `start_work` | Authenticated | Clocks in employee with current timestamp. |
-| `end_work` | Authenticated | Clocks out employee. Rejects if an active break is currently running. |
-| `start_break` | Authenticated | Sets `break_started_at = NOW()`. |
-| `resume_work` / `end_break` | Authenticated | Calculates elapsed break time, adds to `total_break_seconds`, and clears `break_started_at`. |
+| `start_work` | Authenticated | Clocks in employee with current timestamp. Requires `location`; rejected outside the office geofence. |
+| `end_work` | Authenticated | Clocks out employee. Rejects if an active break is currently running. Requires `location`; rejected outside the office geofence. |
+| `start_break` | Authenticated | Sets `break_started_at = NOW()`. Optional `location` is recorded, never enforced. |
+| `resume_work` / `end_break` | Authenticated | Calculates elapsed break time, adds to `total_break_seconds`, and clears `break_started_at`. Optional `location` is recorded, never enforced. |
+| `geofence_config` | Authenticated | Office location, radius and accuracy policy for in-app guidance only. |
 | `leave_submit` | Authenticated | Submits a leave application (`type`, `from`, `to`, `reason`, `is_half_day`). |
 | `leave_history` | Authenticated | Returns the employee's past leave applications and balance breakdown. |
 | `cancel_leave` | Authenticated | Cancels a pending leave request submitted by the employee. |
@@ -253,6 +259,11 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 | `save_public_holiday` | Admin | Creates or updates public holiday details and branch assignments using service role. |
 | `seed_public_holidays` | Admin | Populates default statutory Indian & Kerala public holidays into the database. |
 | `super_admin_change_employee_password` | Super Admin | Resets employee password in Supabase Auth via Admin Auth API. |
+| `admin_geofence_settings` | Admin | Returns office geofence settings, last-changed-by and recent change history. |
+| `admin_save_geofence_settings` | Admin | Validates and saves office location, radius, active flag and accuracy policy. |
+
+### 4.3. Office Geofencing
+Check-in and check-out go through `attendance_action_with_location`, which reads the latest `office_geofence_settings`, validates the submitted fix (accuracy, freshness, timestamp, mock flag), checks the radius, calls the existing attendance RPC and records an `attendance_location_events` row in one transaction. Missing or inactive settings block check-in/out (HTTP 409). Location rejections return HTTP 422 with `error` codes such as `outside_geofence`. Full policy, error codes and rollout steps: [docs/OFFICE_GEOFENCING.md](docs/OFFICE_GEOFENCING.md).
 
 ---
 

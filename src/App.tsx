@@ -11,6 +11,7 @@ import { Organization } from './components/Organization'
 import { Login } from './components/Login'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AdminManagement } from './components/AdminManagement'
+import { OfficeGeofence } from './components/OfficeGeofence'
 
 // Employee Workspace Components
 import { EmployeeSidebar } from './components/employee/EmployeeSidebar'
@@ -32,6 +33,7 @@ const VALID_ADMIN_TABS = [
   'public-holidays',
   'settings',
   'organization',
+  'office-geofence',
   'admin-management',
 ]
 
@@ -133,6 +135,8 @@ function App() {
               <Settings />
             ) : activeTab === 'organization' ? (
               <Organization />
+            ) : activeTab === 'office-geofence' ? (
+              <OfficeGeofence />
             ) : activeTab === 'admin-management' ? (
               <AdminManagement />
             ) : (
