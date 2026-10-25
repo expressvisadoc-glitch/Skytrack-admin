@@ -44,6 +44,14 @@ history; employees may `SELECT` only their own location events; nobody but `serv
    handling, break timer accumulation) are preserved. If it raises, the location event rolls back with it.
 5. Inserts the location event and returns the attendance row.
 
+### Behaviour of the existing attendance RPCs (verified on staging)
+
+The production `start_work`, `end_work`, `start_break` and `resume_work` are `SECURITY DEFINER` functions that
+return `TABLE(attendance_date, check_in, check_out, break_started_at, total_break_seconds, status)` — no `id` —
+and date rows with `current_date` (UTC). The wrapper therefore links each location event via the returned
+`attendance_date`. A repeated `start_work` is idempotent (keeps the first check-in and returns success).
+Checkout during a break raises "Please resume working before checking out."
+
 ### Location accuracy policy
 
 | Check | Rule | Reason code |
@@ -58,7 +66,9 @@ history; employees may `SELECT` only their own location events; nobody but `serv
 
 Accuracy is not added as tolerance, so a poor fix can never widen the fence. Defaults (±50 m, 120 s) suit
 phones with Wi-Fi assisted location indoors; desktop browsers often report ±100 m or worse and will be rejected
-unless an admin relaxes the accuracy limit.
+unless an admin relaxes the accuracy limit (observed in staging: a laptop browser reported ±140 m and was
+rejected with `location_accuracy_too_low`). Radius and accuracy are independent: a fix must be precise enough
+first, then close enough.
 
 ### Missing or inactive configuration
 
