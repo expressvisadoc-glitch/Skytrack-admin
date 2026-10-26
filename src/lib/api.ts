@@ -142,7 +142,8 @@ export interface DashboardAttendanceRecord {
   date: string
   startTime: string
   endTime: string
-  status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' | 'On Break'
+  status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' | 'On Break' | 'Completed'
+  isLate?: boolean
   isOnBreak?: boolean
   breakStartedAt?: string | null
   breakDuration?: string
@@ -702,7 +703,7 @@ export async function getAdminDashboardData(
 
     const isOnBreak = Boolean(attRecord && attRecord.break_started_at && !attRecord.check_out)
 
-    let status: 'Present' | 'Late' | 'Absent' | 'Half Day' | 'Leave' | 'On Break' = 'Absent'
+    let status: DashboardAttendanceRecord['status'] = 'Absent'
     let startTime = '—'
     let endTime = '—'
 
@@ -712,6 +713,9 @@ export async function getAdminDashboardData(
       const rawStatus = (attRecord.status || '').toLowerCase()
       if (isOnBreak) {
         status = 'On Break'
+      } else if (attRecord.check_in && attRecord.check_out) {
+        // Checked out for the day
+        status = 'Completed'
       } else if (rawStatus === 'late') {
         status = 'Late'
       } else if (rawStatus === 'half_day' || rawStatus === 'half day') {
@@ -749,6 +753,7 @@ export async function getAdminDashboardData(
       startTime,
       endTime,
       status,
+      isLate: (attRecord?.status || '').toLowerCase() === 'late',
       isOnBreak,
       breakStartedAt: attRecord?.break_started_at ?? null,
     }
