@@ -265,6 +265,11 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 ### 4.3. Office Geofencing
 Check-in and check-out go through `attendance_action_with_location`, which reads the latest `office_geofence_settings`, validates the submitted fix (accuracy, freshness, timestamp, mock flag), checks the radius, calls the existing attendance RPC and records an `attendance_location_events` row in one transaction. Missing or inactive settings block check-in/out (HTTP 409). Location rejections return HTTP 422 with `error` codes such as `outside_geofence`. Full policy, error codes and rollout steps: [docs/OFFICE_GEOFENCING.md](docs/OFFICE_GEOFENCING.md).
 
+### 4.4. Payroll (planned)
+Payroll and the live salary card are planned on branch `feature/payroll` (built on `feature/office-geofencing`);
+nothing is implemented yet. Rules, architecture, phases and the decision log: [docs/PAYROLL_PLAN.md](docs/PAYROLL_PLAN.md).
+Development uses the staging Supabase project only.
+
 ---
 
 ## 5. Critical Guidelines & Gotchas for AI Agents
