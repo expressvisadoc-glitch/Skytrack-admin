@@ -12,7 +12,7 @@ export function Dashboard() {
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<
-    'All' | 'Present' | 'On Break' | 'Late' | 'Absent' | 'Leave'
+    'All' | 'Present' | 'On Break' | 'Completed' | 'Late' | 'Absent' | 'Leave'
   >('All')
   const [selectedLeave, setSelectedLeave] = useState<DashboardLeaveRequest | null>(
     null
@@ -347,7 +347,7 @@ export function Dashboard() {
 
               {/* Filter Pills */}
               <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-2xl flex-wrap">
-                {(['All', 'Present', 'On Break', 'Late', 'Absent', 'Leave'] as const).map((filter) => {
+                {(['All', 'Present', 'On Break', 'Completed', 'Late', 'Absent', 'Leave'] as const).map((filter) => {
                   const isActive = statusFilter === filter
                   return (
                     <button
@@ -427,7 +427,7 @@ export function Dashboard() {
                         <td className="py-3 px-3 text-xs text-slate-500">{row.date}</td>
                         <td
                           className={`py-3 px-3 text-xs font-bold ${
-                            row.status === 'Late'
+                            row.status === 'Late' || row.isLate
                               ? 'text-red-500'
                               : row.startTime === '—'
                               ? 'text-slate-400'
@@ -452,6 +452,8 @@ export function Dashboard() {
                                 ? 'bg-rose-100/70 text-rose-700 border border-rose-200'
                                 : row.status === 'Half Day'
                                 ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                                : row.status === 'Completed'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200/70'
                                 : 'bg-purple-50 text-purple-700 border border-purple-200/60'
                             }`}
                           >
