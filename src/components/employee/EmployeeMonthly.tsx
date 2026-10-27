@@ -332,7 +332,7 @@ export function EmployeeMonthly() {
                         )}
                         {isWeekend && (
                           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                            Sunday Off
+                            Week Off
                           </span>
                         )}
                         {isAbsent && (

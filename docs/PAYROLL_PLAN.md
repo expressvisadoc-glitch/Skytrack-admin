@@ -1,6 +1,6 @@
 # Payroll & Live Salary — Final Plan
 
-Status: **approved plan, not yet implemented**. Branch: `feature/payroll` (both repos), built on
+Status: **Phase 0 implemented** (staging-tested, not merged); Phases 1–2 not started. Branch: `feature/payroll` (both repos), built on
 `feature/office-geofencing`. Development and testing use the **staging** Supabase project
 (`npwwwapbbvkvteycxaab`) only — never the production project.
 
@@ -168,12 +168,46 @@ Room or DataStore) and is not logged.
   monthly summaries.
 - Before relying on it: one month calculated in parallel with the current payroll method.
 
-## 9. Out of scope
+## 9. Phase 0 implementation notes
+
+Delivered on `feature/payroll`:
+- Migration `20261027000000_payroll_foundations.sql`: `payroll_policy` (+ history, seeded with the agreed values),
+  `attendance_late_marks`, `save_payroll_policy()`, and the `attendance_late_mark` trigger
+  (`AFTER INSERT OR UPDATE OF check_in ON attendance`). The trigger covers every writer: mobile/web check-in via
+  `start_work`, admin manual attendance and the REST fallback.
+- Edge Function: UTC "today" for `attendance_today`, `admin_undo_checkout`, `admin_manual_attendance` and
+  `attendance_monthly`; monthly week-offs from `payroll_policy`; the hardcoded 09:15 late rule removed (manual
+  attendance now returns the status set by the trigger); new actions `admin_payroll_policy`, `admin_save_payroll_policy`.
+- Web: times shown and entered in the viewer's local timezone (`formatTime`, `timeToIso`, `isoToTimeInput`,
+  `getCurrentTimeInput`, monthly view, geofence page); hardcoded 09:15 rule removed from the REST fallback;
+  "Sunday Off" label → "Week Off"; new **Payroll Settings** page (admin sidebar).
+- Android: attendance records matched with the UTC date (`util/AttendanceDates`); times displayed in the device
+  timezone (home and monthly screens, preferring raw timestamps).
+
+Deliberately unchanged (existing behaviour kept, as agreed: "work like production"):
+- Missed checkout: open days are still auto-closed at 18:00 India time once 23:59 India time has passed
+  (`isPast1159` on server, web and Android). No deduction is applied for a missed checkout.
+- Older clients: the server still returns India-formatted `login` / `logout` / `timeFormatted` strings alongside the
+  raw timestamps, so installed app versions keep working. Updated clients prefer the raw timestamps.
+- Duration maths in the Android monthly screen still reads those India-formatted strings in India time.
+- The web REST fallback for the monthly view (used only when the Edge Function fails) treats Sunday as the only
+  week-off, because employees cannot read payroll settings.
+- Leave day counting at approval excludes Sundays only (leave module). Payroll Phase 1 places leave days on
+  working dates using the payroll week-offs and holidays (§4.3).
+- Late marks are not back-filled for attendance recorded before the migration.
+- While an employee is still checked in, the monthly list shows the day as `working`; `late` / `present` appears
+  after checkout (existing display logic).
+
+Verification (staging only): 32 SQL tests on the real production schema copy (rolled back), 23/24 HTTP checks
+through the deployed staging function (the remaining one was a wrong test expectation about the `working` status
+above), web build, Android unit tests (31) and debug/release builds.
+
+## 10. Out of scope
 
 Statutory deductions (PF, ESI, PT, TDS), fixed deductions, one-off adjustments/bonuses, leaving dates, waiving
 late marks, half-day rules for short hours, multiple branches, bank payment files.
 
-## 10. Decision log
+## 11. Decision log
 
 | # | Decision |
 | :-- | :--- |

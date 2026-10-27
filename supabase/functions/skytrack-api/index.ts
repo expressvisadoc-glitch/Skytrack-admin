@@ -422,6 +422,14 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleAdminGeofenceSettings(employee);
     }
 
+    if (action === "admin_payroll_policy") {
+      return await handleAdminPayrollPolicy(employee);
+    }
+
+    if (action === "admin_save_payroll_policy") {
+      return await handleAdminSavePayrollPolicy(employee, body);
+    }
+
     if (action === "admin_save_geofence_settings") {
       return await handleAdminSaveGeofenceSettings(employee, body);
     }
@@ -925,8 +933,8 @@ async function handleLogin(body: any) {
 async function handleAttendanceToday(
   employee: any
 ) {
-  const indiaToday =
-    getIndiaToday();
+  const today =
+    getUtcToday();
 
   const {
     data,
@@ -946,7 +954,7 @@ async function handleAttendanceToday(
     .eq("employee_id", employee.id)
     .eq(
       "attendance_date",
-      indiaToday
+      today
     )
     .maybeSingle();
 
@@ -1844,6 +1852,248 @@ async function handleAdminSaveGeofenceSettings(employee: any, body: any): Promis
     message: "Office location settings saved. They apply to all check-in and check-out attempts from now on.",
     settings: {
       ...formatGeofenceSettings(row),
+      updatedBy: {
+        id: employee.id,
+        employeeId: employee.employee_id ?? null,
+        name: employee.name ?? null
+      }
+    }
+  });
+}
+
+// =============================================================
+// PAYROLL SETTINGS (docs/PAYROLL_PLAN.md)
+// Week-off days, late grace / conversion and the office timezone live in
+// public.payroll_policy. Late marks are decided by the attendance_late_mark trigger.
+// =============================================================
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+const PAYROLL_POLICY_LIMITS = {
+  lateGraceMinutes: { min: 0, max: 240 },
+  lateMarksPerUnit: { min: 1, max: 31 },
+  lateLopDaysPerUnit: { min: 0.01, max: 1 },
+  maxWeekOffDays: 6
+};
+
+async function getWeekOffDays(): Promise<number[]> {
+  const { data, error } = await adminClient
+    .from("payroll_policy")
+    .select("week_off_days")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (error || !data) {
+    // Keeps the previous Sunday-only behaviour if the settings row is unavailable
+    console.error("payroll_policy lookup failed, using Sunday:", error);
+    return [0];
+  }
+  return (data.week_off_days ?? []).map(Number);
+}
+
+function formatPayrollPolicy(row: any) {
+  const weekOffDays = (row?.week_off_days ?? []).map(Number);
+  return {
+    weekOffDays,
+    weekOffDayNames: weekOffDays.map((d: number) => WEEKDAY_NAMES[d]),
+    lateGraceMinutes: Number(row?.late_grace_minutes),
+    lateMarksPerUnit: Number(row?.late_marks_per_unit),
+    lateLopDaysPerUnit: Number(row?.late_lop_days_per_unit),
+    officeTimezone: row?.office_timezone ?? null,
+    updatedAt: row?.updated_at ?? null
+  };
+}
+
+function payrollForbiddenResponse(): Response {
+  return json({
+    success: false,
+    error: "forbidden",
+    message: "Only administrators can manage payroll settings."
+  }, 403);
+}
+
+async function describeEmployees(ids: (string | null | undefined)[]) {
+  const unique = Array.from(new Set(ids.filter(Boolean))) as string[];
+  const byId = new Map<string, any>();
+  if (unique.length > 0) {
+    const { data } = await adminClient
+      .from("employees")
+      .select("id, employee_id, name")
+      .in("id", unique);
+    for (const row of data ?? []) {
+      byId.set(row.id, row);
+    }
+  }
+  return (id: string | null | undefined) => {
+    if (!id) return null;
+    const row = byId.get(id);
+    return { id, employeeId: row?.employee_id ?? null, name: row?.name ?? null };
+  };
+}
+
+async function handleAdminPayrollPolicy(employee: any): Promise<Response> {
+  if (!isAdminRole(employee)) {
+    return payrollForbiddenResponse();
+  }
+
+  const { data, error } = await adminClient
+    .from("payroll_policy")
+    .select("*")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (error || !data) {
+    console.error("admin_payroll_policy error:", error);
+    return json({
+      success: false,
+      error: error ? "database_error" : "payroll_policy_missing",
+      message: "Unable to load the payroll settings."
+    }, 500);
+  }
+
+  const { data: historyRows, error: historyError } = await adminClient
+    .from("payroll_policy_history")
+    .select("*")
+    .order("changed_at", { ascending: false })
+    .limit(10);
+
+  if (historyError) {
+    console.error("admin_payroll_policy history error:", historyError);
+  }
+
+  const describe = await describeEmployees([
+    data.updated_by,
+    ...(historyRows ?? []).map((h: any) => h.changed_by)
+  ]);
+
+  return json({
+    success: true,
+    policy: {
+      ...formatPayrollPolicy(data),
+      updatedBy: describe(data.updated_by)
+    },
+    history: (historyRows ?? []).map((h: any) => ({
+      id: h.id,
+      ...formatPayrollPolicy(h),
+      changedAt: h.changed_at,
+      changedBy: describe(h.changed_by)
+    })),
+    limits: PAYROLL_POLICY_LIMITS
+  });
+}
+
+function isKnownTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validatePayrollPolicyInput(body: any): { errors: string[]; value: any } {
+  const errors: string[] = [];
+  const input = body?.policy && typeof body.policy === "object" ? body.policy : body;
+
+  const rawDays = input?.weekOffDays ?? input?.week_off_days;
+  let weekOffDays: number[] = [];
+  if (!Array.isArray(rawDays) || rawDays.some((d: unknown) => !Number.isInteger(d) || (d as number) < 0 || (d as number) > 6)) {
+    errors.push("Week-off days must be a list of day numbers from 0 (Sunday) to 6 (Saturday).");
+  } else {
+    weekOffDays = Array.from(new Set(rawDays as number[])).sort((a, b) => a - b);
+    if (weekOffDays.length > PAYROLL_POLICY_LIMITS.maxWeekOffDays) {
+      errors.push("At least one day of the week must be a working day.");
+    }
+  }
+
+  const grace = toFiniteNumber(input?.lateGraceMinutes ?? input?.late_grace_minutes);
+  const marksPerUnit = toFiniteNumber(input?.lateMarksPerUnit ?? input?.late_marks_per_unit);
+  const lopPerUnit = toFiniteNumber(input?.lateLopDaysPerUnit ?? input?.late_lop_days_per_unit);
+  const timezone = input?.officeTimezone ?? input?.office_timezone;
+
+  const { lateGraceMinutes, lateMarksPerUnit, lateLopDaysPerUnit } = PAYROLL_POLICY_LIMITS;
+  if (!Number.isInteger(grace) || grace < lateGraceMinutes.min || grace > lateGraceMinutes.max) {
+    errors.push(`Late grace must be a whole number from ${lateGraceMinutes.min} to ${lateGraceMinutes.max} minutes.`);
+  }
+  if (!Number.isInteger(marksPerUnit) || marksPerUnit < lateMarksPerUnit.min || marksPerUnit > lateMarksPerUnit.max) {
+    errors.push(`Late marks per deduction must be a whole number from ${lateMarksPerUnit.min} to ${lateMarksPerUnit.max}.`);
+  }
+  if (
+    !Number.isFinite(lopPerUnit) ||
+    lopPerUnit < lateLopDaysPerUnit.min ||
+    lopPerUnit > lateLopDaysPerUnit.max ||
+    Math.round(lopPerUnit * 100) !== lopPerUnit * 100
+  ) {
+    errors.push("LOP days per deduction must be between 0.01 and 1 with at most two decimals.");
+  }
+  if (typeof timezone !== "string" || !timezone.trim() || !isKnownTimezone(timezone.trim())) {
+    errors.push("Office timezone must be a valid IANA timezone such as Asia/Kolkata.");
+  }
+
+  return {
+    errors,
+    value: {
+      weekOffDays,
+      grace,
+      marksPerUnit,
+      lopPerUnit,
+      timezone: typeof timezone === "string" ? timezone.trim() : null
+    }
+  };
+}
+
+async function handleAdminSavePayrollPolicy(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) {
+    return payrollForbiddenResponse();
+  }
+
+  const { errors, value } = validatePayrollPolicyInput(body);
+  if (errors.length > 0) {
+    return json({
+      success: false,
+      error: "invalid_payroll_policy",
+      message: errors.join(" "),
+      errors
+    }, 400);
+  }
+
+  const { data, error } = await adminClient.rpc(
+    "save_payroll_policy",
+    {
+      p_admin_id: employee.id,
+      p_week_off_days: value.weekOffDays,
+      p_late_grace_minutes: value.grace,
+      p_late_marks_per_unit: value.marksPerUnit,
+      p_late_lop_days_per_unit: value.lopPerUnit,
+      p_office_timezone: value.timezone
+    }
+  );
+
+  if (error) {
+    console.error("admin_save_payroll_policy error:", error);
+    if (error.code === "42501") {
+      return payrollForbiddenResponse();
+    }
+    if (error.code === "23514" || error.code === "22023") {
+      return json({
+        success: false,
+        error: "invalid_payroll_policy",
+        message: "The payroll settings are outside the allowed values."
+      }, 400);
+    }
+    return json({
+      success: false,
+      error: "database_error",
+      message: "Unable to save the payroll settings."
+    }, 500);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return json({
+    success: true,
+    message: "Payroll settings saved. Late-mark rules apply to check-ins from now on; past days are not changed.",
+    policy: {
+      ...formatPayrollPolicy(row),
       updatedBy: {
         id: employee.id,
         employeeId: employee.employee_id ?? null,
@@ -3946,15 +4196,6 @@ async function handleAttendanceMonthly(
       }
     }
 
-    function getIndiaDateString(date = new Date()): string {
-      return new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Asia/Kolkata",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      }).format(date);
-    }
-
     function getMonthStart(monthValue: string): string {
       return `${monthValue}-01`;
     }
@@ -3972,15 +4213,18 @@ async function handleAttendanceMonthly(
       return date.toISOString().slice(0, 10);
     }
 
-    function isSunday(dateString: string): boolean {
+    // Week-off days come from the payroll settings (0 = Sunday … 6 = Saturday)
+    const weekOffDays = await getWeekOffDays();
+
+    function isWeekOff(dateString: string): boolean {
       const [year, monthNumber, day] = dateString.split("-").map(Number);
       const date = new Date(Date.UTC(year, monthNumber - 1, day));
-      return date.getUTCDay() === 0;
+      return weekOffDays.includes(date.getUTCDay());
     }
 
     const monthStart = getMonthStart(month);
     const nextMonthStart = getNextMonthStart(month);
-    const todayIndia = getIndiaDateString();
+    const todayDate = getUtcToday();
 
     const configuredDailyMinutes = Number(
       Deno.env.get("SKYTRACK_DAILY_REQUIRED_MINUTES") ?? "480"
@@ -4160,7 +4404,7 @@ async function handleAttendanceMonthly(
       }
 
       // CASE 2: Currently open attendance for TODAY
-      if (attDate === todayIndia) {
+      if (attDate === todayDate) {
         let endTime = Date.now();
         if (att.break_started_at) {
           const breakStarted = new Date(att.break_started_at).getTime();
@@ -4210,11 +4454,11 @@ async function handleAttendanceMonthly(
         continue;
       }
 
-      const sunday = isSunday(currentDate);
+      const sunday = isWeekOff(currentDate); // week-off day (response keys keep the "sunday" names)
       const isApprovedLeave = approvedLeaveDates.has(currentDate);
       const isPublicHoliday = publicHolidayDates.has(currentDate);
       const att = attendanceMap.get(currentDate) ?? null;
-      const isPastOrToday = currentDate <= todayIndia;
+      const isPastOrToday = currentDate <= todayDate;
 
       if (sunday) sundayDays++;
       if (isApprovedLeave) approvedLeaveDays++;
@@ -4241,7 +4485,7 @@ async function handleAttendanceMonthly(
       const effectiveCheckOut = att?.check_out ?? (hasPunch && isPast1159Date ? autoCheckoutUtc : null);
 
       const isCompleted = Boolean(hasPunch && effectiveCheckOut);
-      const isWorking = hasPunch && !effectiveCheckOut && currentDate === todayIndia;
+      const isWorking = hasPunch && !effectiveCheckOut && currentDate === todayDate;
 
       if (isCompleted) {
         completedAttendanceDays++;
@@ -4406,8 +4650,9 @@ async function handleAttendanceMonthly(
       attendance: attendanceList,
       daily,
       calculation_rules: {
-        weekly_off: "Sunday only",
-        saturday_is_working_day: true,
+        weekly_off: weekOffDays.map((d) => WEEKDAY_NAMES[d]).join(", ") || "None",
+        week_off_days: weekOffDays,
+        saturday_is_working_day: !weekOffDays.includes(6),
         daily_required_minutes: dailyRequiredMinutes,
         approved_leave_excluded: true,
         public_holidays_excluded: true,
@@ -4499,17 +4744,10 @@ function formatLeaveBalance(balance: any) {
 // DATE HELPERS
 // =============================================================
 
-function getIndiaToday(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(new Date());
-}
-
-function getIndiaTodayDate(): string {
-  return getIndiaToday();
+// Attendance rows are dated with the UTC date (the attendance RPCs use current_date on a UTC
+// database), so every "today" lookup uses the UTC date as well. Clients convert times for display.
+function getUtcToday(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 // =============================================================
@@ -5422,7 +5660,7 @@ async function handleAdminUndoCheckout(employee: any, body: any): Promise<Respon
     ensureAdmin(employee);
 
     const targetEmployeeId = String(body.employeeId ?? body.employee_id ?? "").trim();
-    const date = String(body.date ?? body.attendance_date ?? getIndiaToday()).trim();
+    const date = String(body.date ?? body.attendance_date ?? getUtcToday()).trim();
 
     if (!targetEmployeeId) {
       return json({
@@ -5516,7 +5754,7 @@ async function handleAdminManualAttendance(employee: any, body: any): Promise<Re
     ensureAdmin(employee);
 
     const targetEmployeeId = String(body.employeeId ?? body.employee_id ?? "").trim();
-    const date = String(body.date ?? body.attendance_date ?? getIndiaToday()).trim();
+    const date = String(body.date ?? body.attendance_date ?? getUtcToday()).trim();
     const rawCheckIn = body.checkIn ?? body.check_in;
     const rawCheckOut = body.checkOut ?? body.check_out;
 
@@ -5561,16 +5799,11 @@ async function handleAdminManualAttendance(employee: any, body: any): Promise<Re
       }
     }
 
+    // Late / on-time is decided in the database (attendance_late_mark trigger) from the
+    // employee's shift whenever the check-in is set or changed.
     let status = body.status || existing?.status || "present";
-    if (finalCheckIn) {
-      const d = new Date(finalCheckIn);
-      const istHour = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
-      const istMin = (d.getUTCMinutes() + 30) % 60;
-      if (istHour > 9 || (istHour === 9 && istMin > 15)) {
-        status = "late";
-      } else if (status === "absent") {
-        status = "present";
-      }
+    if (finalCheckIn && status === "absent") {
+      status = "present";
     }
 
     let resultRecord: any;
@@ -5616,10 +5849,17 @@ async function handleAdminManualAttendance(employee: any, body: any): Promise<Re
       resultRecord = inserted;
     }
 
+    // Re-read so the response includes the status set by the late-mark trigger
+    const { data: refreshed } = await adminClient
+      .from("attendance")
+      .select("*")
+      .eq("id", resultRecord.id)
+      .maybeSingle();
+
     return json({
       success: true,
       message: "Attendance recorded successfully.",
-      attendance: resultRecord
+      attendance: refreshed ?? resultRecord
     });
   } catch (error) {
     console.error("handleAdminManualAttendance error:", error);

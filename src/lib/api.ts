@@ -454,7 +454,7 @@ export function isDatePast1159(dateStr: string, todayIso: string): boolean {
 }
 
 /**
- * Formats an ISO date or timestamp into readable 12-hour time string in IST (e.g. 06:00 PM)
+ * Formats an ISO timestamp as a 12-hour time in the viewer's local timezone (e.g. 06:00 PM)
  */
 export function formatTime(isoStr?: string | null): string {
   if (!isoStr) return '—'
@@ -465,7 +465,6 @@ export function formatTime(isoStr?: string | null): string {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
-      timeZone: 'Asia/Kolkata',
     })
   } catch {
     return '—'
@@ -1640,7 +1639,7 @@ export async function getEmployeeMonthlyAttendance(
         else if (resolvedStatus === 'half_day') statusLabel = 'Half Day'
         else if (resolvedStatus === 'leave') statusLabel = 'Approved Leave'
         else if (resolvedStatus === 'holiday') statusLabel = 'Public Holiday'
-        else if (resolvedStatus === 'weekend') statusLabel = 'Sunday Off'
+        else if (resolvedStatus === 'weekend') statusLabel = 'Week Off'
         else if (resolvedStatus === 'absent') statusLabel = 'Absent'
         else if (resolvedStatus === 'incomplete') statusLabel = 'Present'
         else if (hasPunch && !att.logout && !att.check_out && !past1159) {
@@ -1668,9 +1667,9 @@ export async function getEmployeeMonthlyAttendance(
 
         const formattedCheckOut = (resolvedStatus === 'working' && !past1159)
           ? 'Active / In Progress'
-          : (att.logout && att.logout !== '00:00'
-              ? (att.logout === '18:00' ? '06:00 PM' : att.logout)
-              : (effectiveCheckOutIso ? formatTime(effectiveCheckOutIso) : (hasPunch && past1159 ? '06:00 PM' : '—')))
+          : (effectiveCheckOutIso
+              ? formatTime(effectiveCheckOutIso)
+              : (att.logout && att.logout !== '00:00' ? att.logout : '—'))
 
         return {
           date: att.date,
@@ -1678,7 +1677,7 @@ export async function getEmployeeMonthlyAttendance(
           dayNumber,
           status: resolvedStatus,
           statusLabel,
-          checkIn: att.login || (att.check_in ? formatTime(att.check_in) : '—'),
+          checkIn: att.check_in ? formatTime(att.check_in) : (att.login || '—'),
           checkOut: formattedCheckOut,
           rawCheckIn: att.check_in,
           rawCheckOut: effectiveCheckOutIso,
@@ -1842,7 +1841,7 @@ export async function getEmployeeMonthlyAttendance(
       leaveDaysCount++
     } else if (isSunday) {
       status = 'weekend'
-      statusLabel = 'Sunday Off'
+      statusLabel = 'Week Off'
       sundayDaysCount++
     } else if (isHoliday) {
       status = 'holiday'
@@ -2797,55 +2796,33 @@ export async function savePublicHoliday(
 }
 
 /**
- * Converts a date string ('YYYY-MM-DD') and time string ('HH:mm') to an ISO-8601 string in Asia/Kolkata (+05:30)
+ * Converts a date string ('YYYY-MM-DD') and a time typed in the viewer's local timezone ('HH:mm')
+ * to a UTC ISO-8601 timestamp
  */
 export function timeToIso(dateStr: string, timeStr: string): string {
   if (!dateStr || !timeStr) return ''
   const trimmedTime = timeStr.trim()
   const formattedTime = trimmedTime.length === 5 ? `${trimmedTime}:00` : trimmedTime
-  return `${dateStr}T${formattedTime}+05:30`
+  const local = new Date(`${dateStr}T${formattedTime}`)
+  return isNaN(local.getTime()) ? '' : local.toISOString()
 }
 
 /**
- * Converts an ISO date string to 'HH:mm' formatted in Asia/Kolkata for <input type="time">
+ * Converts an ISO timestamp to 'HH:mm' in the viewer's local timezone for <input type="time">
  */
 export function isoToTimeInput(isoStr?: string | null): string {
   if (!isoStr) return ''
-  try {
-    const d = new Date(isoStr)
-    if (isNaN(d.getTime())) return ''
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Kolkata',
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-    }).formatToParts(d)
-    const h = parts.find((p) => p.type === 'hour')?.value || '00'
-    const m = parts.find((p) => p.type === 'minute')?.value || '00'
-    return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`
-  } catch {
-    return ''
-  }
+  const d = new Date(isoStr)
+  if (isNaN(d.getTime())) return ''
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 /**
- * Returns the current time in Asia/Kolkata formatted as 'HH:mm' for <input type="time">
+ * Returns the current local time formatted as 'HH:mm' for <input type="time">
  */
 export function getCurrentTimeInput(): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Kolkata',
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-    }).formatToParts(new Date())
-    const h = parts.find((p) => p.type === 'hour')?.value || '00'
-    const m = parts.find((p) => p.type === 'minute')?.value || '00'
-    return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`
-  } catch {
-    const d = new Date()
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  }
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 /**
@@ -2938,23 +2915,10 @@ export async function adminSetAttendance(
     const finalCheckIn = params.checkIn !== undefined ? params.checkIn : existing?.check_in ?? null
     const finalCheckOut = params.checkOut !== undefined ? params.checkOut : existing?.check_out ?? null
 
-    // Determine status
+    // Late / on-time is decided in the database from the employee's shift when check-in changes
     let status = existing?.status || 'present'
-    if (finalCheckIn) {
-      const d = new Date(finalCheckIn)
-      const parts = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Kolkata',
-        hour12: false,
-        hour: 'numeric',
-        minute: 'numeric',
-      }).formatToParts(d)
-      const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0)
-      const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0)
-      if (h > 9 || (h === 9 && m > 15)) {
-        status = 'late'
-      } else if (status === 'absent') {
-        status = 'present'
-      }
+    if (finalCheckIn && status === 'absent') {
+      status = 'present'
     }
 
     // Determine worked minutes if both exist
@@ -3180,6 +3144,52 @@ export async function saveGeofenceSettings(token: string, settings: GeofenceSett
   return fetchSkyTrackApi(token, {
     action: 'admin_save_geofence_settings',
     ...settings,
+  })
+}
+
+export interface PayrollPolicy {
+  weekOffDays: number[]
+  weekOffDayNames: string[]
+  lateGraceMinutes: number
+  lateMarksPerUnit: number
+  lateLopDaysPerUnit: number
+  officeTimezone: string
+  updatedAt: string | null
+  updatedBy: GeofenceAdminRef | null
+}
+
+export interface PayrollPolicyHistoryEntry extends Omit<PayrollPolicy, 'updatedBy'> {
+  id: string
+  changedAt: string
+  changedBy: GeofenceAdminRef | null
+}
+
+export interface PayrollPolicyInput {
+  weekOffDays: number[]
+  lateGraceMinutes: number
+  lateMarksPerUnit: number
+  lateLopDaysPerUnit: number
+  officeTimezone: string
+}
+
+export async function getPayrollPolicy(token: string): Promise<{
+  success: boolean
+  policy: PayrollPolicy
+  history: PayrollPolicyHistoryEntry[]
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_payroll_policy',
+  })
+}
+
+export async function savePayrollPolicy(token: string, policy: PayrollPolicyInput): Promise<{
+  success: boolean
+  message?: string
+  policy: PayrollPolicy
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_save_payroll_policy',
+    ...policy,
   })
 }
 
