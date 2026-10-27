@@ -2686,7 +2686,7 @@ async function handleAdminPayslipGet(employee: any, body: any): Promise<Response
 // =============================================================
 
 const EMPLOYEE_EDITABLE_STATUSES = ["active", "inactive", "suspended", "pending", "terminated"];
-const MAX_PROFILE_PHOTO_LENGTH = 3_000_000; // data URLs from the admin Settings page
+const MAX_PROFILE_PHOTO_LENGTH = 500_000; // same limit as update_profile_photo; clients compress first
 
 async function handleAdminUpdateEmployeeDetails(employee: any, body: any): Promise<Response> {
   if (!isAdminRole(employee)) {
@@ -2751,7 +2751,7 @@ async function handleAdminUpdateEmployeeDetails(employee: any, body: any): Promi
   if (input?.profile_photo_url !== undefined) {
     const photo = input.profile_photo_url;
     if (photo !== null && (typeof photo !== "string" || photo.length > MAX_PROFILE_PHOTO_LENGTH)) {
-      errors.push("profile_photo_url must be an image URL or data URL under 3 MB.");
+      errors.push("Profile photo is too large. Image must be compressed before saving (max 500 KB).");
     } else {
       updates.profile_photo_url = photo || null;
     }

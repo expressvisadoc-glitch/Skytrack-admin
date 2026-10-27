@@ -13,6 +13,28 @@ interface SettingsProps {
   onLogout?: () => void
 }
 
+// Resizes an image data URL to a square-bounded JPEG (default 256 px) for profile photos
+function compressImageDataUrl(dataUrl: string, maxSize = 256, quality = 0.8): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(img.width * scale))
+      canvas.height = Math.max(1, Math.round(img.height * scale))
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        reject(new Error('Unable to process the image.'))
+        return
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      resolve(canvas.toDataURL('image/jpeg', quality))
+    }
+    img.onerror = () => reject(new Error('This file is not a supported image.'))
+    img.src = dataUrl
+  })
+}
+
 export function Settings({ onLogout }: SettingsProps) {
   const { logout, employee, token } = useAuth()
   const [profile, setProfile] = useState<SkyTrackEmployee | null>(employee)
@@ -113,8 +135,9 @@ export function Settings({ onLogout }: SettingsProps) {
 
     const reader = new FileReader()
     reader.onload = async (event) => {
-      const base64Str = event.target?.result as string
       try {
+        // Photos are stored in the database: resize like the Android app does (~15–40 KB)
+        const base64Str = await compressImageDataUrl(event.target?.result as string)
         const updated = await updateEmployeeDetails(token, empId, {
           profile_photo_url: base64Str
         })
