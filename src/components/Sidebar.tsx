@@ -28,7 +28,8 @@ export function Sidebar({ activeTab, onSelectTab, isOpen, onClose }: SidebarProp
     { id: 'settings', label: 'Settings', icon: 'settings' },
     { id: 'organization', label: 'Organization', icon: 'corporate_fare' },
     { id: 'office-geofence', label: 'Office Geofence', icon: 'location_on' },
-    { id: 'payroll-settings', label: 'Payroll Settings', icon: 'payments' },
+    { id: 'payroll', label: 'Payroll', icon: 'account_balance_wallet' },
+    { id: 'payroll-settings', label: 'Payroll Settings', icon: 'tune' },
     ...(isSuperAdmin ? [{ id: 'admin-management', label: 'Admin Management', icon: 'admin_panel_settings' }] : []),
   ]
 

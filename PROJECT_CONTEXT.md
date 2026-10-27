@@ -81,6 +81,9 @@ skytrack-admin/
 │   │   ├── Settings.tsx            # Admin profile and credentials management
 │   │   ├── OfficeGeofence.tsx      # Office location, geofence radius & location-accuracy policy (admin only)
 │   │   ├── PayrollSettings.tsx     # Week-off days, late grace/conversion, office timezone (admin only)
+│   │   ├── Payroll.tsx             # Monthly payroll view of all employees (admin only)
+│   │   ├── EmployeeSalarySection.tsx # Salary panel in Employee Details (admin only)
+│   │   ├── SalaryBreakdown.tsx     # Shared salary line items
 │   │   │
 │   │   └── # --- EMPLOYEE WEB PORTAL COMPONENTS (/employee/*) ---
 │   │       └── employee/
@@ -103,7 +106,8 @@ skytrack-admin/
 │       │   ├── 20261006000000_seed_mandatory_holidays.sql
 │       │   ├── 20261021000000_holiday_admin_policies.sql # Admin policies for public holidays
 │       │   ├── 20261025000000_office_geofence.sql # Office geofence settings, location events, atomic attendance RPC
-│       │   └── 20261027000000_payroll_foundations.sql # Payroll settings, late marks trigger
+│       │   ├── 20261027000000_payroll_foundations.sql # Payroll settings, late marks trigger
+│       │   └── 20261027010000_payroll_salaries.sql # Salary structures, compute_payroll()
 │       └── functions/
 │           └── skytrack-api/
 │               └── index.ts        # Local mirror of the Supabase Edge Function (MUST match root edge_function.ts)
@@ -231,6 +235,7 @@ All application endpoints are consolidated into a single Supabase Edge Function:
 | `office_geofence_settings` | `id` (=1), `latitude`, `longitude`, `radius_m`, `is_active`, `max_accuracy_m`, `max_location_age_s`, `updated_by`, `updated_at` | Single row. Written only via `save_office_geofence_settings` (service role). Admin-only `SELECT`. |
 | `office_geofence_settings_history` | `id`, settings snapshot, `changed_by`, `changed_at` | One row per admin save. |
 | `payroll_policy` | `id` (=1), `week_off_days` (0=Sun…6=Sat), `late_grace_minutes`, `late_marks_per_unit`, `late_lop_days_per_unit`, `office_timezone`, `updated_by` | Single row; history in `payroll_policy_history`. Written only via `save_payroll_policy` (service role). Admin-only `SELECT`. |
+| `salary_structures` | `employee_id`, `monthly_gross`, `effective_from`, `note`, `created_by`, `created_at` | Never edited or deleted; the latest row on or before a date applies. Written only via `add_salary_structure`. Employees see own rows, admins all. |
 | `attendance_late_marks` | `attendance_id`, `employee_id`, `attendance_date`, `is_late`, `minutes_late`, `reason`, shift snapshot | Written by the `attendance_late_mark` trigger; also sets `attendance.status` to `late` / `present`. Employees see own rows, admins all. |
 | `attendance_location_events` | `id`, `employee_id`, `attendance_id`, `action`, `outcome`, `reason_code`, `location_status`, coordinates, `accuracy_m`, `distance_m`, `received_at` | Location evidence for every attendance action. Employees see own rows, admins all; writes service role only. |
 
@@ -265,6 +270,9 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 | `super_admin_change_employee_password` | Super Admin | Resets employee password in Supabase Auth via Admin Auth API. |
 | `admin_geofence_settings` | Admin | Returns office geofence settings, last-changed-by and recent change history. |
 | `admin_save_geofence_settings` | Admin | Validates and saves office location, radius, active flag and accuracy policy. |
+| `salary_summary` | Authenticated | Employee's own provisional salary for a month (`month` = `YYYY-MM`, default current). |
+| `admin_salary_get` / `admin_salary_save` | Admin | Salary history and current-month figures for one employee / add a salary effective from a date. |
+| `admin_payroll_month` | Admin | Every employee's provisional figures for a month. |
 | `admin_payroll_policy` | Admin | Returns payroll settings (week-off days, late grace/conversion, office timezone) and change history. |
 | `admin_save_payroll_policy` | Admin | Validates and saves payroll settings. |
 
@@ -276,7 +284,10 @@ Planned on branch `feature/payroll` (built on `feature/office-geofencing`). **Ph
 attendance "today" uses the UTC date everywhere, times are displayed in the viewer's local timezone, late marks are
 decided from each employee's shift by the `attendance_late_mark` trigger (stored in `attendance_late_marks`, past
 days never re-evaluated after shift/setting changes), and admins edit `payroll_policy` on the **Payroll Settings**
-page. Salaries and payslips (Phases 1–2) are not implemented yet. Rules, architecture, phases and the decision log: [docs/PAYROLL_PLAN.md](docs/PAYROLL_PLAN.md).
+page. **Phase 1 is implemented** too: admins set salaries in Employee Details → Salary (`salary_structures`, effective-dated
+history), `compute_payroll()` calculates working days, absences, LOP leave and late-mark deductions, employees see a
+hidden "This month's salary" card (web Home and Android Home), and admins see all employees on the **Payroll** page.
+Month locking and payslips (Phase 2) are not implemented yet. Rules, architecture, phases and the decision log: [docs/PAYROLL_PLAN.md](docs/PAYROLL_PLAN.md).
 Development uses the staging Supabase project only.
 
 ---

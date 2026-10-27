@@ -10,6 +10,7 @@ import {
   isSessionExpiredError
 } from '../../lib/api'
 import { getBrowserLocation } from '../../lib/geolocation'
+import { EmployeeSalaryCard } from './EmployeeSalaryCard'
 import { 
   LogOut, 
   Coffee, 
@@ -31,6 +32,8 @@ export function EmployeeHome() {
   const [isActionLoading, setIsActionLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  // Bumped after every attendance reload so a revealed salary card recalculates
+  const [salaryRefreshKey, setSalaryRefreshKey] = useState(0)
 
   // Live timer states (in seconds)
   const [workSeconds, setWorkSeconds] = useState(0)
@@ -50,6 +53,7 @@ export function EmployeeHome() {
       } else {
         setAttendance(null)
       }
+      setSalaryRefreshKey((k) => k + 1)
     } catch (err: any) {
       console.error('Failed to load today attendance:', err)
       if (isSessionExpiredError(err)) {
@@ -792,8 +796,10 @@ export function EmployeeHome() {
           </div>
         </div>
 
-        {/* Side Bento Card: Today's Summary & Break Ledger */}
+        {/* Side Bento Card: Salary, Today's Summary & Break Ledger */}
         <div className="space-y-6 flex flex-col">
+          <EmployeeSalaryCard refreshKey={salaryRefreshKey} />
+
           {/* Card 1: Today's Punch Summary */}
           <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-4">
             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-2">

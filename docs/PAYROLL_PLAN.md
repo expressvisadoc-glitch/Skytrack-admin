@@ -1,6 +1,6 @@
 # Payroll & Live Salary — Final Plan
 
-Status: **Phase 0 implemented** (staging-tested, not merged); Phases 1–2 not started. Branch: `feature/payroll` (both repos), built on
+Status: **Phases 0 and 1 implemented** (staging-tested, not merged); Phase 2 (month close) not started. Branch: `feature/payroll` (both repos), built on
 `feature/office-geofencing`. Development and testing use the **staging** Supabase project
 (`npwwwapbbvkvteycxaab`) only — never the production project.
 
@@ -202,12 +202,37 @@ Verification (staging only): 32 SQL tests on the real production schema copy (ro
 through the deployed staging function (the remaining one was a wrong test expectation about the `working` status
 above), web build, Android unit tests (31) and debug/release builds.
 
-## 10. Out of scope
+## 10. Phase 1 implementation notes
+
+Delivered on `feature/payroll`:
+- Migration `20261027010000_payroll_salaries.sql`: `salary_structures` (employee-own / admin `SELECT`, writes via
+  `add_salary_structure()` only), and `compute_payroll(employee, month, as_of)` implementing §2 and §4.
+- Edge Function actions: `salary_summary` (employee, own figures only — any `employeeId` in the body is ignored),
+  `admin_salary_get`, `admin_salary_save`, `admin_payroll_month`. Salary responses carry `Cache-Control: no-store`.
+- Web: hidden salary card on the employee Home page (fetched only when revealed, refreshed after every attendance
+  reload); **Salary** section in Employee Details (show/hide, change salary from a date, history, this month's
+  breakdown); **Payroll** page (month picker, every employee's figures, totals, flags; amounts hidden by default).
+- Android: `SalaryRepository` (no cache), `SalaryViewModel` and `SalaryCard` on Home — hidden by default, cleared
+  when the app goes to the background, refreshed after check-in/out and breaks.
+
+Calculation details decided during implementation (adjust if needed):
+- No joining date: the whole month is counted and the employee is flagged (`joining_date_missing`).
+- First salary set part-way through a month: earlier working days are unpaid (`salary_starts_mid_month`).
+- Late-mark deduction uses the per-day rate of the salary in effect at the end of the period.
+- Two salary rows with the same effective date: the most recently saved one applies (history keeps both).
+- Approved leave rows without a paid/LOP split are treated as paid.
+- Employees included in the admin month view: active employees plus anyone with attendance that month.
+
+Verification (staging only): 32 calculation tests with hand-worked figures (worked example, joiner, mid-month
+salary change, cross-month and half-day leave, late-mark pairs, holiday/week-off changes, permissions), 28 HTTP
+checks through the deployed staging function, web build, Android unit tests (35) and debug/release/staging builds.
+
+## 11. Out of scope
 
 Statutory deductions (PF, ESI, PT, TDS), fixed deductions, one-off adjustments/bonuses, leaving dates, waiving
 late marks, half-day rules for short hours, multiple branches, bank payment files.
 
-## 11. Decision log
+## 12. Decision log
 
 | # | Decision |
 | :-- | :--- |

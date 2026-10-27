@@ -17,6 +17,7 @@ import {
   isUuid,
   type OrganizationData,
 } from '../lib/api'
+import { EmployeeSalarySection } from './EmployeeSalarySection'
 
 interface EmployeeDetailsProps {
   employee?: EmployeeDirectoryItem | null
@@ -1153,6 +1154,11 @@ export function EmployeeDetails({
             </div>
           </div>
         </div>
+
+        {/* Salary Section (admins and super admins) */}
+        {currentEmp && (currentEmp.id || currentEmp.employee_id) && (
+          <EmployeeSalarySection employeeId={currentEmp.id || currentEmp.employee_id} employeeName={currentEmp.name} />
+        )}
 
         {/* Leave Balance Section */}
         {leaveBalance && (

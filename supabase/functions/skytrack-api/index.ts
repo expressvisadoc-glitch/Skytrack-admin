@@ -422,6 +422,22 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleAdminGeofenceSettings(employee);
     }
 
+    if (action === "salary_summary") {
+      return await handleSalarySummary(employee, body);
+    }
+
+    if (action === "admin_salary_get") {
+      return await handleAdminSalaryGet(employee, body);
+    }
+
+    if (action === "admin_salary_save") {
+      return await handleAdminSalarySave(employee, body);
+    }
+
+    if (action === "admin_payroll_month") {
+      return await handleAdminPayrollMonth(employee, body);
+    }
+
     if (action === "admin_payroll_policy") {
       return await handleAdminPayrollPolicy(employee);
     }
@@ -2101,6 +2117,269 @@ async function handleAdminSavePayrollPolicy(employee: any, body: any): Promise<R
       }
     }
   });
+}
+
+// =============================================================
+// SALARIES & PAYROLL CALCULATION (docs/PAYROLL_PLAN.md, Phase 1)
+// All figures come from public.compute_payroll(); salaries from public.salary_structures.
+// Employees only ever receive their own figures; admin actions require admin / super_admin.
+// =============================================================
+
+const SALARY_LIMITS = { maxMonthlyGross: 10000000, noteMaxLength: 200 };
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Salary responses must not be stored by browsers or proxies
+function privateJson(data: unknown, status = 200): Response {
+  const response = json(data, status);
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
+function parseMonth(value: unknown): string | null {
+  const month = typeof value === "string" && value.trim() ? value.trim() : getUtcToday().slice(0, 7);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
+  return month;
+}
+
+function isValidIsoDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+async function findEmployeeByIdOrCode(idOrCode: unknown) {
+  const value = String(idOrCode ?? "").trim();
+  if (!value) return null;
+  const query = adminClient.from("employees").select("id, employee_id, name, status, role, joining_date");
+  const { data } = UUID_PATTERN.test(value)
+    ? await query.eq("id", value).maybeSingle()
+    : await query.eq("employee_id", value).maybeSingle();
+  return data ?? null;
+}
+
+function formatPayrollResult(r: any) {
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  return {
+    status: r?.status ?? "error",
+    month: r?.month ?? null,
+    asOf: r?.as_of ?? null,
+    isComplete: r?.is_complete === true,
+    provisional: true,
+    monthlyGross: num(r?.monthly_gross),
+    workingDaysInMonth: num(r?.working_days_in_month),
+    employedWorkingDays: num(r?.employed_working_days),
+    paidWorkingDays: num(r?.paid_working_days),
+    completedWorkingDays: num(r?.completed_working_days),
+    presentDays: num(r?.present_days),
+    perDayRate: num(r?.per_day_rate),
+    earnedGross: num(r?.earned_gross),
+    absenceDays: num(r?.absence_days),
+    absenceAmount: num(r?.absence_amount),
+    lopLeaveDays: num(r?.lop_leave_days),
+    lopLeaveAmount: num(r?.lop_leave_amount),
+    lateMarks: num(r?.late_marks),
+    lateMarksPerUnit: num(r?.late_marks_per_unit),
+    lateLopDaysPerUnit: num(r?.late_lop_days_per_unit),
+    lateLopDays: num(r?.late_lop_days),
+    lateAmount: num(r?.late_amount),
+    totalLopDays: num(r?.total_lop_days),
+    totalDeductions: num(r?.total_deductions),
+    netPay: num(r?.net_pay),
+    joiningDate: r?.joining_date ?? null,
+    flags: r?.flags ?? [],
+    days: (r?.days ?? []).map((d: any) => ({
+      date: d.date,
+      type: d.type,
+      days: Number(d.days),
+      amount: Number(d.amount)
+    }))
+  };
+}
+
+async function computePayroll(employeeDbId: string, month: string) {
+  return await adminClient.rpc("compute_payroll", {
+    p_employee_id: employeeDbId,
+    p_month: `${month}-01`,
+    p_as_of: getUtcToday()
+  });
+}
+
+// Employee: own provisional salary for a month (default: current month)
+async function handleSalarySummary(employee: any, body: any): Promise<Response> {
+  const month = parseMonth(body?.month);
+  if (!month) {
+    return privateJson({ success: false, error: "invalid_month", message: "Month must be in YYYY-MM format." }, 400);
+  }
+
+  const { data, error } = await computePayroll(employee.id, month);
+  if (error) {
+    console.error("salary_summary error:", error);
+    return privateJson({
+      success: false,
+      error: "salary_unavailable",
+      message: "Unable to calculate your salary right now. Please try again."
+    }, 500);
+  }
+
+  return privateJson({ success: true, salary: formatPayrollResult(data) });
+}
+
+async function salaryHistoryFor(employeeDbId: string) {
+  const { data, error } = await adminClient
+    .from("salary_structures")
+    .select("id, monthly_gross, effective_from, note, created_by, created_at")
+    .eq("employee_id", employeeDbId)
+    .order("effective_from", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  const describe = await describeEmployees((data ?? []).map((row: any) => row.created_by));
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    monthlyGross: Number(row.monthly_gross),
+    effectiveFrom: row.effective_from,
+    note: row.note ?? null,
+    createdAt: row.created_at,
+    createdBy: describe(row.created_by)
+  }));
+}
+
+async function handleAdminSalaryGet(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) return payrollForbiddenResponse();
+
+  const target = await findEmployeeByIdOrCode(body?.employeeId ?? body?.employee_id);
+  if (!target) {
+    return privateJson({ success: false, error: "employee_not_found", message: "Employee not found." }, 404);
+  }
+
+  try {
+    const history = await salaryHistoryFor(target.id);
+    const { data, error } = await computePayroll(target.id, getUtcToday().slice(0, 7));
+    if (error) throw error;
+    return privateJson({
+      success: true,
+      employee: { id: target.id, employeeId: target.employee_id, name: target.name, joiningDate: target.joining_date },
+      history,
+      currentMonth: formatPayrollResult(data),
+      limits: SALARY_LIMITS
+    });
+  } catch (error) {
+    console.error("admin_salary_get error:", error);
+    return privateJson({ success: false, error: "database_error", message: "Unable to load the salary." }, 500);
+  }
+}
+
+async function handleAdminSalarySave(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) return payrollForbiddenResponse();
+
+  const target = await findEmployeeByIdOrCode(body?.employeeId ?? body?.employee_id);
+  if (!target) {
+    return privateJson({ success: false, error: "employee_not_found", message: "Employee not found." }, 404);
+  }
+
+  const errors: string[] = [];
+  const gross = toFiniteNumber(body?.monthlyGross ?? body?.monthly_gross);
+  const effectiveFrom = body?.effectiveFrom ?? body?.effective_from;
+  const note = body?.note ?? null;
+
+  if (!Number.isFinite(gross) || gross <= 0 || gross > SALARY_LIMITS.maxMonthlyGross || Math.round(gross * 100) !== gross * 100) {
+    errors.push(`Monthly gross must be a positive amount up to ${SALARY_LIMITS.maxMonthlyGross} with at most two decimals.`);
+  }
+  if (!isValidIsoDate(effectiveFrom)) {
+    errors.push("Effective date must be a valid date (YYYY-MM-DD).");
+  }
+  if (note !== null && (typeof note !== "string" || note.trim().length > SALARY_LIMITS.noteMaxLength)) {
+    errors.push(`Note must be text of at most ${SALARY_LIMITS.noteMaxLength} characters.`);
+  }
+  if (errors.length > 0) {
+    return privateJson({ success: false, error: "invalid_salary", message: errors.join(" "), errors }, 400);
+  }
+
+  const { error } = await adminClient.rpc("add_salary_structure", {
+    p_admin_id: employee.id,
+    p_employee_id: target.id,
+    p_monthly_gross: gross,
+    p_effective_from: effectiveFrom,
+    p_note: typeof note === "string" ? note.trim() : null
+  });
+
+  if (error) {
+    console.error("admin_salary_save error:", error);
+    if (error.code === "42501") return payrollForbiddenResponse();
+    if (error.code === "23514") {
+      return privateJson({ success: false, error: "invalid_salary", message: "The salary is outside the allowed range." }, 400);
+    }
+    return privateJson({ success: false, error: "database_error", message: "Unable to save the salary." }, 500);
+  }
+
+  try {
+    const history = await salaryHistoryFor(target.id);
+    return privateJson({
+      success: true,
+      message: `Salary saved for ${target.name}. It applies from ${effectiveFrom}.`,
+      history
+    });
+  } catch (historyError) {
+    console.error("admin_salary_save history error:", historyError);
+    return privateJson({ success: true, message: "Salary saved.", history: [] });
+  }
+}
+
+// Admin: every employee's figures for a month (active employees plus anyone with attendance that month)
+async function handleAdminPayrollMonth(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) return payrollForbiddenResponse();
+
+  const month = parseMonth(body?.month);
+  if (!month) {
+    return privateJson({ success: false, error: "invalid_month", message: "Month must be in YYYY-MM format." }, 400);
+  }
+
+  const [year, monthNumber] = month.split("-").map(Number);
+  const nextMonth = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 10);
+
+  const { data: employees, error: employeesError } = await adminClient
+    .from("employees")
+    .select("id, employee_id, name, status, role, designation, joining_date, work_shift_id");
+  const { data: attendanceRows, error: attendanceError } = await adminClient
+    .from("attendance")
+    .select("employee_id")
+    .gte("attendance_date", `${month}-01`)
+    .lt("attendance_date", nextMonth);
+
+  if (employeesError || attendanceError) {
+    console.error("admin_payroll_month error:", employeesError ?? attendanceError);
+    return privateJson({ success: false, error: "database_error", message: "Unable to load payroll." }, 500);
+  }
+
+  const withAttendance = new Set((attendanceRows ?? []).map((row: any) => row.employee_id));
+  const included = (employees ?? [])
+    .filter((e: any) => e.status === "active" || withAttendance.has(e.id))
+    .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+
+  const rows = await Promise.all(included.map(async (e: any) => {
+    const { data, error } = await computePayroll(e.id, month);
+    const result = error ? null : formatPayrollResult(data);
+    const flags = [...(result?.flags ?? [])];
+    if (!e.work_shift_id) flags.push("no_shift");
+    if (error) {
+      console.error("compute_payroll failed for", e.employee_id, error);
+      flags.push("calculation_failed");
+    }
+    const { days: _days, ...summary } = result ?? ({} as any);
+    return {
+      employee: {
+        id: e.id,
+        employeeId: e.employee_id,
+        name: e.name,
+        designation: e.designation ?? null,
+        status: e.status,
+        joiningDate: e.joining_date ?? null
+      },
+      salary: result ? { ...summary, flags } : { status: "error", flags }
+    };
+  }));
+
+  return privateJson({ success: true, month, asOf: getUtcToday(), rows });
 }
 
 function isPast1159(dateString: string): boolean {

@@ -13,6 +13,7 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 import { AdminManagement } from './components/AdminManagement'
 import { OfficeGeofence } from './components/OfficeGeofence'
 import { PayrollSettings } from './components/PayrollSettings'
+import { Payroll } from './components/Payroll'
 
 // Employee Workspace Components
 import { EmployeeSidebar } from './components/employee/EmployeeSidebar'
@@ -35,6 +36,7 @@ const VALID_ADMIN_TABS = [
   'settings',
   'organization',
   'office-geofence',
+  'payroll',
   'payroll-settings',
   'admin-management',
 ]
@@ -139,6 +141,8 @@ function App() {
               <Organization />
             ) : activeTab === 'office-geofence' ? (
               <OfficeGeofence />
+            ) : activeTab === 'payroll' ? (
+              <Payroll />
             ) : activeTab === 'payroll-settings' ? (
               <PayrollSettings />
             ) : activeTab === 'admin-management' ? (

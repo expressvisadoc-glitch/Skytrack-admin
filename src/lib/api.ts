@@ -3193,6 +3193,119 @@ export async function savePayrollPolicy(token: string, policy: PayrollPolicyInpu
   })
 }
 
+export interface SalaryDay {
+  date: string
+  type: 'absent' | 'lop_leave' | 'late'
+  days: number
+  amount: number
+}
+
+/** Result of the backend's compute_payroll(). Figures are provisional until payroll is locked. */
+export interface SalarySummary {
+  status: 'ok' | 'no_salary' | 'not_employed' | 'no_working_days' | 'error'
+  month: string | null
+  asOf: string | null
+  isComplete: boolean
+  provisional: boolean
+  monthlyGross: number | null
+  workingDaysInMonth: number | null
+  employedWorkingDays: number | null
+  paidWorkingDays: number | null
+  completedWorkingDays: number | null
+  presentDays: number | null
+  perDayRate: number | null
+  earnedGross: number | null
+  absenceDays: number | null
+  absenceAmount: number | null
+  lopLeaveDays: number | null
+  lopLeaveAmount: number | null
+  lateMarks: number | null
+  lateMarksPerUnit: number | null
+  lateLopDaysPerUnit: number | null
+  lateLopDays: number | null
+  lateAmount: number | null
+  totalLopDays: number | null
+  totalDeductions: number | null
+  netPay: number | null
+  joiningDate: string | null
+  flags: string[]
+  days?: SalaryDay[]
+}
+
+export interface SalaryHistoryEntry {
+  id: string
+  monthlyGross: number
+  effectiveFrom: string
+  note: string | null
+  createdAt: string
+  createdBy: GeofenceAdminRef | null
+}
+
+export interface PayrollMonthRow {
+  employee: {
+    id: string
+    employeeId: string
+    name: string
+    designation: string | null
+    status: string
+    joiningDate: string | null
+  }
+  salary: SalarySummary
+}
+
+export async function getMySalarySummary(token: string, month?: string): Promise<{
+  success: boolean
+  salary: SalarySummary
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'salary_summary',
+    ...(month ? { month } : {}),
+  })
+}
+
+export async function getEmployeeSalary(token: string, employeeId: string): Promise<{
+  success: boolean
+  history: SalaryHistoryEntry[]
+  currentMonth: SalarySummary
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_salary_get',
+    employeeId,
+  })
+}
+
+export async function saveEmployeeSalary(
+  token: string,
+  input: { employeeId: string; monthlyGross: number; effectiveFrom: string; note?: string | null }
+): Promise<{ success: boolean; message?: string; history: SalaryHistoryEntry[] }> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_salary_save',
+    ...input,
+  })
+}
+
+export async function getPayrollMonth(token: string, month: string): Promise<{
+  success: boolean
+  month: string
+  asOf: string
+  rows: PayrollMonthRow[]
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_payroll_month',
+    month,
+  })
+}
+
+export function formatRupees(amount?: number | null, withPaise = false): string {
+  if (amount === null || amount === undefined || !Number.isFinite(amount)) return '—'
+  return amount.toLocaleString('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: withPaise ? 2 : 0,
+    maximumFractionDigits: withPaise ? 2 : 0,
+  })
+}
+
 export async function getPublicHolidaysList(token: string): Promise<{
   success: boolean
   holidays: PublicHolidayItem[]
