@@ -302,6 +302,10 @@ from the Monthly page (web and Android). While a month is locked, the database r
 published-holiday and backdated-salary changes for it (SQLSTATE `PLOCK`; Edge Function returns 409 `payroll_month_locked`). Rules, architecture, phases and the decision log: [docs/PAYROLL_PLAN.md](docs/PAYROLL_PLAN.md).
 Development uses the staging Supabase project only.
 
+
+**Next steps:** production rollout order and rollback in [docs/PRODUCTION_ROLLOUT.md](docs/PRODUCTION_ROLLOUT.md);
+after go-live, the monthly Google Sheets archive in [docs/GOOGLE_SHEETS_EXPORT.md](docs/GOOGLE_SHEETS_EXPORT.md)
+(planned, not built).
 ---
 
 ## 5. Critical Guidelines & Gotchas for AI Agents

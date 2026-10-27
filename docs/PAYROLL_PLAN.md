@@ -283,3 +283,4 @@ late marks, half-day rules for short hours, multiple branches, bank payment file
 | 16 | Month close with lock, reopen (reason, logged), versioned payslips; locked-month edits refused |
 | 17 | Built on `feature/office-geofencing`; staging project only |
 | 18 | Payslip on the company letterhead with company, employee details, month, working/paid days, gross, itemised deductions and net; no bank details, logo or signature line |
+| 19 | Monthly Google Sheets archive via a service account (option C, personal Gmail), set up after go-live — [GOOGLE_SHEETS_EXPORT.md](GOOGLE_SHEETS_EXPORT.md) |
