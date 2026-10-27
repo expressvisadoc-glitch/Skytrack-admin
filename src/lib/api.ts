@@ -384,40 +384,6 @@ async function patchSupabaseRest<T = any>(
 /**
  * Performs authenticated REST POST queries against Supabase
  */
-async function postSupabaseRest<T = any>(
-  path: string,
-  body: any,
-  token?: string
-): Promise<T> {
-  const headers: Record<string, string> = {
-    apikey: SUPABASE_ANON_KEY,
-    'Content-Type': 'application/json',
-    Prefer: 'return=representation',
-  }
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-
-  const response = await fetch(`${SUPABASE_REST_URL}/${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  })
-
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      notifySessionExpired('Your session is invalid or expired.')
-      throw new Error('SESSION_EXPIRED')
-    }
-    const errText = await response.text()
-    throw new Error(`Supabase query failed: ${errText || response.statusText}`)
-  }
-
-  const text = await response.text()
-  return text ? JSON.parse(text) : ({} as T)
-}
-
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function isUuid(val?: string | null): boolean {
@@ -2836,43 +2802,13 @@ export async function adminUndoCheckOut(
     attendanceDbId?: string | null
   }
 ): Promise<{ success: boolean; message?: string }> {
-  // 1. Attempt edge function RPC
-  try {
-    const res = await fetchSkyTrackApi(token, {
-      action: 'admin_undo_checkout',
-      employeeId: params.employeeDbId,
-      date: params.date,
-    })
-    if (res && res.success) {
-      return res
-    }
-  } catch (err: any) {
-    console.warn('Edge function admin_undo_checkout fallback to Supabase REST:', err)
-  }
-
-  // 2. Fallback to direct Supabase REST PATCH
-  try {
-    const filter = params.attendanceDbId
-      ? `attendance?id=eq.${params.attendanceDbId}`
-      : `attendance?employee_id=eq.${params.employeeDbId}&attendance_date=eq.${params.date}`
-
-    await patchSupabaseRest(
-      filter,
-      {
-        check_out: null,
-        worked_minutes: null,
-        updated_at: new Date().toISOString(),
-      },
-      token
-    )
-    return {
-      success: true,
-      message: 'Check out undone successfully.',
-    }
-  } catch (err: any) {
-    console.error('Failed to undo check out via Supabase REST:', err)
-    throw new Error(err?.message || 'Unable to undo check out.')
-  }
+  // Server only: a direct database write would bypass validation and could report success without
+  // changing anything. fetchSkyTrackApi throws with the server's message on failure.
+  return fetchSkyTrackApi(token, {
+    action: 'admin_undo_checkout',
+    employeeId: params.employeeDbId,
+    date: params.date,
+  })
 }
 
 /**
@@ -2888,89 +2824,15 @@ export async function adminSetAttendance(
     attendanceDbId?: string | null
   }
 ): Promise<{ success: boolean; message?: string }> {
-  // 1. Attempt edge function RPC
-  try {
-    const res = await fetchSkyTrackApi(token, {
-      action: 'admin_manual_attendance',
-      employeeId: params.employeeDbId,
-      date: params.date,
-      checkIn: params.checkIn,
-      checkOut: params.checkOut,
-    })
-    if (res && res.success) {
-      return res
-    }
-  } catch (err: any) {
-    console.warn('Edge function admin_manual_attendance fallback to Supabase REST:', err)
-  }
-
-  // 2. Fallback to direct Supabase REST
-  try {
-    const existingList = await fetchSupabaseRest<any[]>(
-      `attendance?employee_id=eq.${params.employeeDbId}&attendance_date=eq.${params.date}&select=*`,
-      token
-    )
-    const existing = existingList?.[0]
-
-    const finalCheckIn = params.checkIn !== undefined ? params.checkIn : existing?.check_in ?? null
-    const finalCheckOut = params.checkOut !== undefined ? params.checkOut : existing?.check_out ?? null
-
-    // Late / on-time is decided in the database from the employee's shift when check-in changes
-    let status = existing?.status || 'present'
-    if (finalCheckIn && status === 'absent') {
-      status = 'present'
-    }
-
-    // Determine worked minutes if both exist
-    let workedMinutes: number | null = null
-    if (finalCheckIn && finalCheckOut) {
-      const breakSec = existing?.total_break_seconds ?? (existing?.break_minutes ? existing.break_minutes * 60 : 0)
-      const inMs = new Date(finalCheckIn).getTime()
-      const outMs = new Date(finalCheckOut).getTime()
-      if (outMs > inMs) {
-        workedMinutes = Math.max(0, Math.floor((outMs - inMs) / 60000) - Math.round(breakSec / 60))
-      }
-    }
-
-    if (existing) {
-      await patchSupabaseRest(
-        `attendance?id=eq.${existing.id}`,
-        {
-          check_in: finalCheckIn,
-          check_out: finalCheckOut,
-          worked_minutes: workedMinutes,
-          status,
-          updated_at: new Date().toISOString(),
-        },
-        token
-      )
-    } else {
-      await postSupabaseRest(
-        'attendance',
-        {
-          employee_id: params.employeeDbId,
-          attendance_date: params.date,
-          check_in: finalCheckIn,
-          check_out: finalCheckOut,
-          worked_minutes: workedMinutes,
-          status: status || 'present',
-          break_minutes: 0,
-          total_break_seconds: 0,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        token
-      )
-    }
-
-    return {
-      success: true,
-      message: 'Attendance recorded successfully.',
-    }
-  } catch (err: any) {
-    console.error('Failed to set attendance via Supabase REST:', err)
-    throw new Error(err?.message || 'Unable to update attendance.')
-  }
+  // Server only: lateness, worked minutes and validation happen there, and a direct database write
+  // could report success without changing anything. fetchSkyTrackApi throws with the server's message.
+  return fetchSkyTrackApi(token, {
+    action: 'admin_manual_attendance',
+    employeeId: params.employeeDbId,
+    date: params.date,
+    checkIn: params.checkIn,
+    checkOut: params.checkOut,
+  })
 }
 
 // =============================================================

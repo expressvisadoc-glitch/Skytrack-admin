@@ -322,6 +322,16 @@ Development uses the staging Supabase project only.
 > **5. Dynamic Reporting Manager Resolution**:
 > When an employee has `reporting_manager_id` assigned, always resolve the manager's actual name using `organization_data` or the profile lookup. Never display static fallback names (e.g., "John Doe") or "Not Assigned" when a manager ID exists.
 
+> [!CAUTION]
+> **6. Known open RLS policies (production, unfixed as of October 2026)**:
+> The production schema has `USING (true)` / `WITH CHECK (true)` INSERT and UPDATE policies for `authenticated` on
+> `employees`, `attendance` and `leaves` (plus full table grants to `anon`/`authenticated`). Any signed-in user can
+> therefore write those tables directly through `/rest/v1` with the public anon key — including changing an
+> employee's `role`, approving leave, or editing check-in times (bypassing geofencing and payroll rules).
+> Web admin attendance writes no longer fall back to direct REST (`adminSetAttendance`, `adminUndoCheckOut`);
+> `updateEmployeeDetails` and `updateWorkShift` still PATCH tables directly and must move to the Edge Function
+> before these policies are tightened.
+
 ---
 
 ## 6. Common Development Commands
