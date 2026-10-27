@@ -107,7 +107,8 @@ skytrack-admin/
 │       │   ├── 20261021000000_holiday_admin_policies.sql # Admin policies for public holidays
 │       │   ├── 20261025000000_office_geofence.sql # Office geofence settings, location events, atomic attendance RPC
 │       │   ├── 20261027000000_payroll_foundations.sql # Payroll settings, late marks trigger
-│       │   └── 20261027010000_payroll_salaries.sql # Salary structures, compute_payroll()
+│       │   ├── 20261027010000_payroll_salaries.sql # Salary structures, compute_payroll()
+│       │   └── 20261027020000_rls_hardening.sql # Read-own / admin-read RLS, no direct writes to HR tables
 │       └── functions/
 │           └── skytrack-api/
 │               └── index.ts        # Local mirror of the Supabase Edge Function (MUST match root edge_function.ts)
@@ -273,6 +274,8 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 | `salary_summary` | Authenticated | Employee's own provisional salary for a month (`month` = `YYYY-MM`, default current). |
 | `admin_salary_get` / `admin_salary_save` | Admin | Salary history and current-month figures for one employee / add a salary effective from a date. |
 | `admin_payroll_month` | Admin | Every employee's provisional figures for a month. |
+| `admin_update_employee_details` | Admin | Edits name, designation, department, email, phone, status, profile photo (not role). Super admins' records only by super admins. |
+| `admin_update_work_shift` | Admin | Edits a work shift's start/end time and working minutes. |
 | `admin_payroll_policy` | Admin | Returns payroll settings (week-off days, late grace/conversion, office timezone) and change history. |
 | `admin_save_payroll_policy` | Admin | Validates and saves payroll settings. |
 
@@ -323,14 +326,17 @@ Development uses the staging Supabase project only.
 > When an employee has `reporting_manager_id` assigned, always resolve the manager's actual name using `organization_data` or the profile lookup. Never display static fallback names (e.g., "John Doe") or "Not Assigned" when a manager ID exists.
 
 > [!CAUTION]
-> **6. Known open RLS policies (production, unfixed as of October 2026)**:
-> The production schema has `USING (true)` / `WITH CHECK (true)` INSERT and UPDATE policies for `authenticated` on
-> `employees`, `attendance` and `leaves` (plus full table grants to `anon`/`authenticated`). Any signed-in user can
-> therefore write those tables directly through `/rest/v1` with the public anon key — including changing an
-> employee's `role`, approving leave, or editing check-in times (bypassing geofencing and payroll rules).
-> Web admin attendance writes no longer fall back to direct REST (`adminSetAttendance`, `adminUndoCheckOut`);
-> `updateEmployeeDetails` and `updateWorkShift` still PATCH tables directly and must move to the Edge Function
-> before these policies are tightened.
+> **6. Row Level Security on HR tables (fixed on `feature/payroll`, not yet in production)**:
+> Production originally had `USING (true)` / `WITH CHECK (true)` INSERT and UPDATE policies for `authenticated` on
+> `employees`, `attendance` and `leaves`, plus full table grants to `anon`, so any signed-in user could write those
+> tables through `/rest/v1` (e.g. set their own `role` to `super_admin`). Migration
+> `20261027020000_rls_hardening.sql` replaces them: employees read only their own rows, active admins read all rows
+> (`is_active_admin()`), nobody writes directly, and `anon` has no access to HR tables.
+> **All writes must go through the Edge Function** (service role). The web app no longer writes these tables directly:
+> employee edits use `admin_update_employee_details`, shift edits `admin_update_work_shift`, attendance edits
+> `admin_manual_attendance` / `admin_undo_checkout`.
+> **Rollout order**: deploy the Edge Function and the web app first, then apply the migration (older web builds that
+> PATCH `employees` / `work_shifts` directly stop working once it is applied).
 
 ---
 

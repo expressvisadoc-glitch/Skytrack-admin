@@ -346,42 +346,6 @@ async function fetchSupabaseRest<T = any>(
 }
 
 /**
- * Performs authenticated REST PATCH queries against Supabase
- */
-async function patchSupabaseRest<T = any>(
-  path: string,
-  body: any,
-  token?: string
-): Promise<T> {
-  const headers: Record<string, string> = {
-    apikey: SUPABASE_ANON_KEY,
-    'Content-Type': 'application/json',
-  }
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-
-  const response = await fetch(`${SUPABASE_REST_URL}/${path}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(body),
-  })
-
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      notifySessionExpired('Your session is invalid or expired.')
-      throw new Error('SESSION_EXPIRED')
-    }
-    throw new Error(`Supabase query failed: ${response.statusText}`)
-  }
-
-  if (response.status === 204) return {} as T
-  const text = await response.text()
-  return text ? JSON.parse(text) : ({} as T)
-}
-
-/**
  * Performs authenticated REST POST queries against Supabase
  */
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -567,11 +531,13 @@ export async function updateWorkShift(
   endTime: string,
   workingMinutes: number
 ) {
-  return patchSupabaseRest(`work_shifts?id=eq.${shiftId}`, {
-    start_time: startTime,
-    end_time: endTime,
-    working_minutes: workingMinutes
-  }, token)
+  return fetchSkyTrackApi(token, {
+    action: 'admin_update_work_shift',
+    shiftId,
+    startTime,
+    endTime,
+    workingMinutes,
+  })
 }
 
 /**
@@ -2051,43 +2017,6 @@ export async function getLeaveSubmissions(
 }
 
 /**
- * Updates leave request status (Approve / Reject) in Supabase
- */
-export async function updateLeaveStatus(
-  token: string,
-  leaveId: string,
-  status: 'approved' | 'rejected',
-  comment?: string
-): Promise<void> {
-  const headers: Record<string, string> = {
-    apikey: SUPABASE_ANON_KEY,
-    'Content-Type': 'application/json',
-    Prefer: 'return=minimal',
-  }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-
-  const payload: any = {
-    status,
-    approved_at: new Date().toISOString(),
-  }
-  if (comment) {
-    payload.manager_comment = comment
-  }
-
-  const response = await fetch(`${SUPABASE_REST_URL}/leaves?id=eq.${leaveId}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(payload),
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to update leave request status: ${response.statusText}`)
-  }
-}
-
-/**
  * Fetches latest admin user and employee profile using the authenticated token
  */
 export async function getAdminProfile(
@@ -2242,8 +2171,6 @@ export async function updateAdminPassword(
 
 export interface UpdateEmployeePayload {
   name?: string
-  first_name?: string
-  last_name?: string
   email?: string
   phone?: string
   designation?: string
@@ -2261,37 +2188,13 @@ export async function updateEmployeeDetails(
   employeeDbId: string,
   updates: UpdateEmployeePayload
 ): Promise<SkyTrackEmployee> {
-  const headers: Record<string, string> = {
-    apikey: SUPABASE_ANON_KEY,
-    'Content-Type': 'application/json',
-    Prefer: 'return=representation',
-  }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-
-  const response = await fetch(`${SUPABASE_REST_URL}/employees?id=eq.${employeeDbId}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    }),
+  // Employees are read-only for signed-in users; changes go through the Edge Function (admin only)
+  const res = await fetchSkyTrackApi<{ success: boolean; employee: SkyTrackEmployee }>(token, {
+    action: 'admin_update_employee_details',
+    employeeId: employeeDbId,
+    updates,
   })
-
-  if (!response.ok) {
-    let msg = 'Failed to update employee details.'
-    try {
-      const err = await response.json()
-      msg = err?.message || err?.msg || msg
-    } catch {
-      // ignore
-    }
-    throw new Error(msg)
-  }
-
-  const result = await response.json()
-  return result?.[0]
+  return res.employee
 }
 
 

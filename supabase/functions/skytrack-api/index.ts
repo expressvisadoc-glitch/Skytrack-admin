@@ -422,6 +422,14 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleAdminGeofenceSettings(employee);
     }
 
+    if (action === "admin_update_employee_details") {
+      return await handleAdminUpdateEmployeeDetails(employee, body);
+    }
+
+    if (action === "admin_update_work_shift") {
+      return await handleAdminUpdateWorkShift(employee, body);
+    }
+
     if (action === "salary_summary") {
       return await handleSalarySummary(employee, body);
     }
@@ -2380,6 +2388,160 @@ async function handleAdminPayrollMonth(employee: any, body: any): Promise<Respon
   }));
 
   return privateJson({ success: true, month, asOf: getUtcToday(), rows });
+}
+
+// =============================================================
+// ADMIN EMPLOYEE / SHIFT UPDATES
+// These replace direct table writes from the web app; employees and work_shifts are
+// read-only for signed-in users (20261027020000_rls_hardening.sql).
+// =============================================================
+
+const EMPLOYEE_EDITABLE_STATUSES = ["active", "inactive", "suspended", "pending", "terminated"];
+const MAX_PROFILE_PHOTO_LENGTH = 3_000_000; // data URLs from the admin Settings page
+
+async function handleAdminUpdateEmployeeDetails(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) {
+    return json({ success: false, error: "forbidden", message: "Only administrators can edit employee details." }, 403);
+  }
+
+  const target = await findEmployeeByIdOrCode(body?.employeeId ?? body?.employee_id ?? body?.id);
+  if (!target) {
+    return json({ success: false, error: "employee_not_found", message: "Employee not found." }, 404);
+  }
+  if (target.role === "super_admin" && employee.role !== "super_admin" && target.id !== employee.id) {
+    return json({ success: false, error: "forbidden", message: "Only a super admin can edit a super admin's details." }, 403);
+  }
+
+  const input = body?.updates && typeof body.updates === "object" ? body.updates : body;
+  const updates: Record<string, unknown> = {};
+  const errors: string[] = [];
+  const text = (key: string, max: number, required = false) => {
+    if (input?.[key] === undefined) return;
+    const value = input[key];
+    if (value !== null && typeof value !== "string") {
+      errors.push(`${key} must be text.`);
+      return;
+    }
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (required && !trimmed) {
+      errors.push(`${key} cannot be empty.`);
+      return;
+    }
+    if (trimmed.length > max) {
+      errors.push(`${key} must be at most ${max} characters.`);
+      return;
+    }
+    updates[key] = trimmed || null;
+  };
+
+  text("name", 120, true);
+  text("designation", 120);
+  text("department", 120);
+  text("phone", 30);
+  text("email", 254);
+  if (typeof updates.email === "string" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updates.email)) {
+    errors.push("email must be a valid email address.");
+  }
+  if (input?.department_id !== undefined) {
+    if (input.department_id !== null && !UUID_PATTERN.test(String(input.department_id))) {
+      errors.push("department_id must be a valid id.");
+    } else {
+      updates.department_id = input.department_id;
+    }
+  }
+  if (input?.status !== undefined) {
+    const status = String(input.status).toLowerCase();
+    if (!EMPLOYEE_EDITABLE_STATUSES.includes(status)) {
+      errors.push(`status must be one of ${EMPLOYEE_EDITABLE_STATUSES.join(", ")}.`);
+    } else if (target.id === employee.id && status !== "active") {
+      errors.push("You cannot deactivate your own account.");
+    } else {
+      updates.status = status;
+    }
+  }
+  if (input?.profile_photo_url !== undefined) {
+    const photo = input.profile_photo_url;
+    if (photo !== null && (typeof photo !== "string" || photo.length > MAX_PROFILE_PHOTO_LENGTH)) {
+      errors.push("profile_photo_url must be an image URL or data URL under 3 MB.");
+    } else {
+      updates.profile_photo_url = photo || null;
+    }
+  }
+
+  if (errors.length > 0) {
+    return json({ success: false, error: "invalid_employee_details", message: errors.join(" "), errors }, 400);
+  }
+  if (Object.keys(updates).length === 0) {
+    return json({ success: false, error: "nothing_to_update", message: "No changes were provided." }, 400);
+  }
+
+  const { data, error } = await adminClient
+    .from("employees")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", target.id)
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("admin_update_employee_details error:", error);
+    const duplicate = error.code === "23505";
+    return json({
+      success: false,
+      error: duplicate ? "duplicate_value" : "update_failed",
+      message: duplicate ? "Another employee already uses that value." : "Unable to update employee details."
+    }, duplicate ? 409 : 500);
+  }
+
+  return json({ success: true, message: "Employee details updated.", employee: data });
+}
+
+async function handleAdminUpdateWorkShift(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) {
+    return json({ success: false, error: "forbidden", message: "Only administrators can edit work shifts." }, 403);
+  }
+
+  const shiftId = String(body?.shiftId ?? body?.id ?? "").trim();
+  const timePattern = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+  const start = String(body?.startTime ?? body?.start_time ?? "").trim();
+  const end = String(body?.endTime ?? body?.end_time ?? "").trim();
+  const workingMinutes = toFiniteNumber(body?.workingMinutes ?? body?.working_minutes);
+
+  const errors: string[] = [];
+  if (!UUID_PATTERN.test(shiftId)) errors.push("A valid shift id is required.");
+  if (!timePattern.test(start)) errors.push("Start time must be HH:MM.");
+  if (!timePattern.test(end)) errors.push("End time must be HH:MM.");
+  if (!Number.isInteger(workingMinutes) || workingMinutes < 1 || workingMinutes > 1440) {
+    errors.push("Working minutes must be a whole number from 1 to 1440.");
+  }
+  if (errors.length > 0) {
+    return json({ success: false, error: "invalid_work_shift", message: errors.join(" "), errors }, 400);
+  }
+
+  const { data, error } = await adminClient
+    .from("work_shifts")
+    .update({
+      start_time: start.length === 5 ? `${start}:00` : start,
+      end_time: end.length === 5 ? `${end}:00` : end,
+      working_minutes: workingMinutes,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", shiftId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    console.error("admin_update_work_shift error:", error);
+    return json({ success: false, error: "update_failed", message: "Unable to update the work shift." }, 500);
+  }
+  if (!data) {
+    return json({ success: false, error: "shift_not_found", message: "Work shift not found." }, 404);
+  }
+
+  return json({
+    success: true,
+    message: "Work shift updated. Late marks use the new start time from the next check-in.",
+    shift: data
+  });
 }
 
 function isPast1159(dateString: string): boolean {
