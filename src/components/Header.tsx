@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { NotificationPanel } from './NotificationPanel'
+import { useOnlineStatus } from '../lib/useOnlineStatus'
 
 export function Header({ onSelectTab, onToggleSidebar }: { onSelectTab?: (tab: string) => void, onToggleSidebar?: () => void }) {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
   const [actionableCount, setActionableCount] = useState<number>(0)
   const [currentDate, setCurrentDate] = useState(new Date())
+  const isOnline = useOnlineStatus()
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -45,10 +47,16 @@ export function Header({ onSelectTab, onToggleSidebar }: { onSelectTab?: (tab: s
           <span className="text-xs font-semibold text-slate-700">{formattedDate}</span>
         </div>
 
-        {/* Operational Live Pill */}
-        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200/60 rounded-full text-xs font-bold">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span>Operational</span>
+        {/* Connection status (real browser network state) */}
+        <div
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border ${
+            isOnline ? 'bg-emerald-50 text-emerald-700 border-emerald-200/60' : 'bg-red-50 text-red-700 border-red-200/60'
+          }`}
+          role="status"
+          title={isOnline ? 'Connected to the internet' : 'No internet connection: changes cannot be saved'}
+        >
+          <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+          <span>{isOnline ? 'Online' : 'Offline'}</span>
         </div>
 
         {/* Notification Bell */}

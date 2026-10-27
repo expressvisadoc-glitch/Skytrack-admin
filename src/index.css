@@ -64,5 +64,13 @@
   -webkit-font-feature-settings: 'liga';
   -webkit-font-smoothing: antialiased;
   font-feature-settings: 'liga';
+  /* Icons are ligatures (e.g. "dashboard"): keep a one-icon box so the name can never widen the layout */
+  width: 1em;
+  overflow: hidden;
+}
+
+/* Until the icon font has loaded, hide the ligature names instead of showing them as words */
+html:not(.icons-ready) .material-symbols-outlined {
+  color: transparent !important;
 }
 

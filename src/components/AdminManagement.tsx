@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { getEmployeesDirectory, updateEmployeeRole, type EmployeeDirectoryItem } from '../lib/api'
+import { EmptyState } from './EmptyState'
 
 export function AdminManagement() {
   const { token, logout, employee } = useAuth()
@@ -130,7 +131,7 @@ export function AdminManagement() {
                   </tr>
                 ) : employees.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-12 text-center">No employees found.</td>
+                    <td colSpan={4}><EmptyState icon="group_off" title="No employees found" /></td>
                   </tr>
                 ) : (
                   employees.map((emp) => (

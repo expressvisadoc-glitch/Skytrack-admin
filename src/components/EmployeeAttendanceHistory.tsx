@@ -9,6 +9,7 @@ import {
   type EmployeeMonthlyAttendanceResult,
   type MonthlyAttendanceDay,
 } from '../lib/api'
+import { EmptyState } from './EmptyState'
 
 interface EmployeeOption {
   id: string
@@ -672,8 +673,8 @@ export function EmployeeAttendanceHistory({
                   </tr>
                 ) : filteredDays.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400 font-medium text-xs">
-                      No attendance records found for this period.
+                    <td colSpan={8}>
+                      <EmptyState icon="event_busy" title="No days to show" description="No days in this month match the current search or filter." />
                     </td>
                   </tr>
                 ) : (

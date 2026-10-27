@@ -33,7 +33,7 @@ So: **release the Android app first**, then in one short session **back up → m
 4. **Release the Android app** (it works with the current backend):
    1. Merge `feature/payroll` → `development` → `main` (Android repo), resolving the stashed "reporting manager" WIP
       separately.
-   2. Bump `versionCode` to **3** and `versionName` to **1.1.0** in `app/build.gradle.kts`.
+   2. Check `versionCode` **3** / `versionName` **1.1.0** in `app/build.gradle.kts` (already set on `feature/payroll`).
    3. Build the release APK (`./gradlew assembleRelease`). Note: release builds are currently signed with the
       **debug key** (`signingConfig = signingConfigs.getByName("debug")`); keep it the same so the update installs
       over the existing app.

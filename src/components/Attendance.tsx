@@ -12,6 +12,7 @@ import {
 } from '../lib/api'
 import { generateAttendancePdf } from '../lib/attendancePdf'
 import { EmployeeAttendanceHistory } from './EmployeeAttendanceHistory'
+import { EmptyState } from './EmptyState'
 
 export function Attendance() {
   const { token, logout } = useAuth()
@@ -756,8 +757,8 @@ export function Attendance() {
                     </tr>
                   ) : filteredRecords.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400 font-medium text-xs">
-                        No attendance logs found matching your criteria.
+                      <td colSpan={7}>
+                        <EmptyState icon="event_busy" title="No attendance to show" description="No check-ins match this date and filter. Try another date or filter." />
                       </td>
                     </tr>
                   ) : (
@@ -1199,8 +1200,8 @@ export function Attendance() {
                   {/* History Items List */}
                   <div className="flex flex-col gap-2">
                     {selectedRecord.history.length === 0 ? (
-                      <div className="p-4 rounded-xl bg-slate-50 text-center text-slate-400 text-xs">
-                        No previous records recorded for this employee.
+                      <div className="rounded-xl bg-slate-50">
+                        <EmptyState compact icon="history" title="No earlier records" description="Previous days for this employee will appear here." />
                       </div>
                     ) : (
                       selectedRecord.history.map((hist, idx) => (

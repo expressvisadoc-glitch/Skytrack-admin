@@ -10,6 +10,7 @@ import {
 } from '../lib/api'
 import { currentUtcMonth, salaryStatusMessage } from '../lib/salary'
 import { SalaryBreakdown } from './SalaryBreakdown'
+import { EmptyState } from './EmptyState'
 
 const MAX_MONTHLY_GROSS = 10000000
 
@@ -245,7 +246,7 @@ export function EmployeeSalarySection({ employeeId, employeeName }: EmployeeSala
           <div className="flex flex-col gap-2">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Salary history</span>
             {history.length === 0 ? (
-              <p className="text-sm text-slate-400">No salary entries yet.</p>
+              <EmptyState compact icon="payments" title="No salary set yet" description="Use Change Salary to set this employee's monthly gross." />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">

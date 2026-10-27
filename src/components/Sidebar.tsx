@@ -1,4 +1,5 @@
 import { useAuth } from '../contexts/AuthContext'
+import { useOnlineStatus } from '../lib/useOnlineStatus'
 
 interface SidebarProps {
   activeTab: string
@@ -18,6 +19,7 @@ interface NavItem {
 export function Sidebar({ activeTab, onSelectTab, isOpen, onClose }: SidebarProps) {
   const { employee } = useAuth()
   const isSuperAdmin = employee?.role === 'super_admin'
+  const isOnline = useOnlineStatus()
 
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
@@ -109,19 +111,19 @@ export function Sidebar({ activeTab, onSelectTab, isOpen, onClose }: SidebarProp
         </nav>
       </div>
 
-      {/* Bottom status pill */}
+      {/* Bottom status pill: real connection status */}
       <div className="p-4">
-        <div className="p-3.5 rounded-2xl bg-[#181d27] text-white flex items-center justify-between shadow-xl shadow-slate-900/10 border border-slate-700/50">
+        <div className="p-3.5 rounded-2xl bg-[#181d27] text-white flex items-center justify-between shadow-xl shadow-slate-900/10 border border-slate-700/50" role="status">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center border border-red-500/30">
-              <span className="material-symbols-outlined text-[18px]">wifi_tethering</span>
+              <span className="material-symbols-outlined text-[18px]">{isOnline ? 'wifi' : 'wifi_off'}</span>
             </div>
             <div className="flex flex-col">
-              <span className="text-xs font-semibold text-white tracking-wide">Online Link</span>
-              <span className="text-[11px] text-slate-400">v2.4.0 • Live</span>
+              <span className="text-xs font-semibold text-white tracking-wide">{isOnline ? 'Online' : 'Offline'}</span>
+              <span className="text-[11px] text-slate-400">{isOnline ? 'Connected to SkyTrack' : 'Changes cannot be saved'}</span>
             </div>
           </div>
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+          <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-red-400'}`}></div>
         </div>
       </div>
     </aside>

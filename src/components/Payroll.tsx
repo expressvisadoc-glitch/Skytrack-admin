@@ -11,6 +11,7 @@ import {
 } from '../lib/api'
 import { currentUtcMonth, formatDays, salaryFlagLabel, salaryStatusMessage } from '../lib/salary'
 import { downloadPayslipPdf } from '../lib/payslipPdf'
+import { EmptyState } from './EmptyState'
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback
@@ -327,7 +328,7 @@ export function Payroll() {
               <button type="button" onClick={() => { setIsLoading(true); load(month) }} className="text-xs font-bold cursor-pointer">Retry</button>
             </div>
           ) : rows.length === 0 ? (
-            <p className="p-6 text-sm text-slate-400">No employees for this month.</p>
+            <EmptyState icon="group_off" title="No employees for this month" description="Active employees and anyone with attendance in the month appear here." />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

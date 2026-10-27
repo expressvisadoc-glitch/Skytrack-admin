@@ -7,6 +7,7 @@ import {
   cancelLeave,
   type LeaveSubmissionRecord,
 } from '../lib/api'
+import { EmptyState } from './EmptyState'
 
 export function LeaveManagement() {
   const { token } = useAuth()
@@ -376,8 +377,8 @@ export function LeaveManagement() {
                   <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
                     {filteredSubmissions.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="py-12 text-center text-slate-400 text-xs font-medium">
-                          No leave submissions found for this filter.
+                        <td colSpan={8}>
+                          <EmptyState icon="event_available" title="No leave requests" description="Nothing matches this filter. Requests from employees will appear here." />
                         </td>
                       </tr>
                     ) : (

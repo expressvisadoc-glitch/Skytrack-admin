@@ -5,6 +5,7 @@ import {
   type DashboardData,
   type DashboardLeaveRequest,
 } from '../lib/api'
+import { EmptyState } from './EmptyState'
 
 export function Dashboard() {
   const { token, employee, logout } = useAuth()
@@ -383,11 +384,8 @@ export function Dashboard() {
                 <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
                   {filteredAttendance.length === 0 ? (
                     <tr>
-                      <td
-                        colSpan={6}
-                        className="py-10 text-center text-xs text-slate-400 font-medium"
-                      >
-                        No attendance records match the selected filter for today.
+                      <td colSpan={6}>
+                        <EmptyState icon="filter_alt_off" title="Nobody in this group today" description="No employees match the selected filter for today." />
                       </td>
                     </tr>
                   ) : (
@@ -491,8 +489,8 @@ export function Dashboard() {
 
               <div className="flex flex-col gap-3">
                 {(data?.pendingLeaveRequests || []).length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-400 font-medium bg-white rounded-2xl border border-slate-100">
-                    No pending leave requests requiring review.
+                  <div className="bg-white rounded-2xl border border-slate-100">
+                    <EmptyState compact icon="task_alt" title="All caught up" description="No leave requests are waiting for review." />
                   </div>
                 ) : (
                   (data?.pendingLeaveRequests || []).map((req) => (
@@ -552,8 +550,8 @@ export function Dashboard() {
               </div>
               <div className="flex flex-col gap-3.5">
                 {(data?.recentActivity || []).length === 0 ? (
-                  <div className="p-8 text-center text-xs text-slate-400 font-medium bg-white rounded-2xl border border-slate-100">
-                    No employee activity recorded today.
+                  <div className="bg-white rounded-2xl border border-slate-100">
+                    <EmptyState compact icon="schedule" title="No activity yet today" description="Check-ins, check-outs and breaks will appear here as they happen." />
                   </div>
                 ) : (
                   (data?.recentActivity || []).map((act) => (

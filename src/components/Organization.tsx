@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { getOrganizationData, updateWorkShift, type Department, type WorkShift } from '../lib/api'
+import { EmptyState } from './EmptyState'
 
 export function Organization() {
   const { token } = useAuth()
@@ -150,7 +151,7 @@ export function Organization() {
 
             <div className="pt-4 flex flex-col gap-3 flex-1">
               {departments.length === 0 ? (
-                <div className="text-center py-8 text-sm text-slate-400">No departments found.</div>
+                <EmptyState compact icon="corporate_fare" title="No departments yet" />
               ) : (
                 departments.map(dept => (
                   <div key={dept.id} className="p-4 rounded-xl bg-slate-50/80 border border-slate-100 flex items-center justify-between">
@@ -176,7 +177,7 @@ export function Organization() {
 
             <div className="pt-4 flex flex-col gap-4 flex-1">
               {shifts.length === 0 ? (
-                <div className="text-center py-8 text-sm text-slate-400">No work shifts found.</div>
+                <EmptyState compact icon="schedule" title="No work shifts yet" />
               ) : (
                 shifts.map(shift => {
                   const isEditing = editingShiftId === shift.id;

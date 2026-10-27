@@ -18,6 +18,7 @@ import {
   type OrganizationData,
 } from '../lib/api'
 import { EmployeeSalarySection } from './EmployeeSalarySection'
+import { EmptyState } from './EmptyState'
 
 interface EmployeeDetailsProps {
   employee?: EmployeeDirectoryItem | null
@@ -1290,7 +1291,7 @@ export function EmployeeDetails({
             {/* Attendance History Table */}
             <div className="overflow-x-auto w-full border border-slate-200/80 rounded-xl">
               <table className="w-full text-left border-collapse">
-                <thead>
+                <thead className={!isLoading && attendanceHistory.length === 0 ? 'hidden' : undefined}>
                   <tr className="bg-slate-50/90 border-b border-slate-200/80 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
                     <th className="py-3.5 px-6" scope="col">Date</th>
                     <th className="py-3.5 px-4" scope="col">Start Work</th>
@@ -1307,8 +1308,8 @@ export function EmployeeDetails({
                     </tr>
                   ) : attendanceHistory.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="py-8 text-center text-xs text-slate-400 font-medium">
-                        No attendance history records found for this employee.
+                      <td colSpan={4}>
+                        <EmptyState icon="event_busy" title="No attendance this month" description="Check-ins for this employee will appear here." />
                       </td>
                     </tr>
                   ) : (
@@ -1385,7 +1386,7 @@ export function EmployeeDetails({
           <div className="p-6 pt-4">
             <div className="overflow-x-auto w-full border border-slate-200/80 rounded-xl">
               <table className="w-full text-left border-collapse">
-                <thead>
+                <thead className={!isLoading && leaveHistory.length === 0 ? 'hidden' : undefined}>
                   <tr className="bg-slate-50/90 border-b border-slate-200/80 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
                     <th className="py-3.5 px-6" scope="col">From</th>
                     <th className="py-3.5 px-4" scope="col">To</th>
@@ -1403,8 +1404,8 @@ export function EmployeeDetails({
                     </tr>
                   ) : leaveHistory.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-xs text-slate-400 font-medium">
-                        No leave history records found for this employee.
+                      <td colSpan={5}>
+                        <EmptyState icon="beach_access" title="No leave requests" description="Leave requests from this employee will appear here." />
                       </td>
                     </tr>
                   ) : (
