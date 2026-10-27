@@ -3016,6 +3016,50 @@ export interface PayrollMonthRow {
     joiningDate: string | null
   }
   salary: SalarySummary
+  /** Present when the month is locked and this employee has a payslip */
+  payslip?: { payslipNumber: string; version: number; generatedAt: string } | null
+}
+
+export interface PayrollRunEvent {
+  event: 'locked' | 'reopened'
+  version: number
+  reason: string | null
+  payslipCount: number | null
+  skipped: { employee_id: string; name: string; status: string }[]
+  at: string
+  by: GeofenceAdminRef | null
+}
+
+export interface PayrollRunInfo {
+  status: 'open' | 'locked'
+  version: number
+  lockedAt: string | null
+  canLock: boolean
+  events: PayrollRunEvent[]
+}
+
+export interface Payslip {
+  payslipNumber: string
+  month: string
+  version: number
+  generatedAt: string
+  companyName: string | null
+  employee: {
+    id: string
+    employeeId: string | null
+    name: string | null
+    designation: string | null
+    department: string | null
+  }
+  salary: SalarySummary
+}
+
+export interface PayslipListItem {
+  payslipNumber: string
+  month: string
+  version: number
+  generatedAt: string
+  netPay: number | null
 }
 
 export async function getMySalarySummary(token: string, month?: string): Promise<{
@@ -3053,11 +3097,51 @@ export async function getPayrollMonth(token: string, month: string): Promise<{
   success: boolean
   month: string
   asOf: string
+  run: PayrollRunInfo
   rows: PayrollMonthRow[]
 }> {
   return fetchSkyTrackApi(token, {
     action: 'admin_payroll_month',
     month,
+  })
+}
+
+export async function lockPayrollMonth(token: string, month: string): Promise<{
+  success: boolean
+  message?: string
+  version: number
+  payslipCount: number
+  skipped: { employee_id: string; name: string; status: string }[]
+}> {
+  return fetchSkyTrackApi(token, { action: 'admin_payroll_lock', month })
+}
+
+export async function reopenPayrollMonth(token: string, month: string, reason: string): Promise<{
+  success: boolean
+  message?: string
+}> {
+  return fetchSkyTrackApi(token, { action: 'admin_payroll_reopen', month, reason })
+}
+
+export async function getMyPayslips(token: string): Promise<{ success: boolean; payslips: PayslipListItem[] }> {
+  return fetchSkyTrackApi(token, { action: 'payslip_list' })
+}
+
+export async function getMyPayslip(token: string, month: string): Promise<{ success: boolean; payslip: Payslip }> {
+  return fetchSkyTrackApi(token, { action: 'payslip_get', month })
+}
+
+export async function getEmployeePayslip(
+  token: string,
+  employeeId: string,
+  month: string,
+  version?: number
+): Promise<{ success: boolean; payslip: Payslip }> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_payslip_get',
+    employeeId,
+    month,
+    ...(version ? { version } : {}),
   })
 }
 

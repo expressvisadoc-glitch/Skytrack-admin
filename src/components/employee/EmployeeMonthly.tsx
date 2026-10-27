@@ -16,6 +16,7 @@ import {
   Briefcase,
   Hourglass
 } from 'lucide-react'
+import { EmployeePayslips } from './EmployeePayslips'
 
 export function EmployeeMonthly() {
   const { token, employee, logout } = useAuth()
@@ -181,6 +182,9 @@ export function EmployeeMonthly() {
           </div>
         </div>
       )}
+
+      {/* Payslips for locked payroll months */}
+      <EmployeePayslips />
 
       {/* Monthly Statistics Bento Pods */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">

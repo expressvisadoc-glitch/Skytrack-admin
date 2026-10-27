@@ -1,6 +1,6 @@
 # Payroll & Live Salary — Final Plan
 
-Status: **Phases 0 and 1 implemented** (staging-tested, not merged); Phase 2 (month close) not started. Branch: `feature/payroll` (both repos), built on
+Status: **Phases 0, 1 and 2 implemented** (staging-tested, not merged or deployed). Branch: `feature/payroll` (both repos), built on
 `feature/office-geofencing`. Development and testing use the **staging** Supabase project
 (`npwwwapbbvkvteycxaab`) only — never the production project.
 
@@ -227,12 +227,41 @@ Verification (staging only): 32 calculation tests with hand-worked figures (work
 salary change, cross-month and half-day leave, late-mark pairs, holiday/week-off changes, permissions), 28 HTTP
 checks through the deployed staging function, web build, Android unit tests (35) and debug/release/staging builds.
 
-## 11. Out of scope
+## 11. Phase 2 implementation notes
+
+Delivered on `feature/payroll`:
+- Migration `20261027030000_payroll_runs.sql`: `payroll_runs`, `payroll_run_events` (lock/reopen audit with reason),
+  versioned `payslips` (frozen `compute_payroll()` snapshot + employee details), `lock_payroll_month()`,
+  `reopen_payroll_month()`, `employee_has_payroll_records()`, and guard triggers (SQLSTATE `PLOCK`).
+- Rules: a month can be locked only after it has ended; employees whose figures are not `ok` (e.g. no salary) get no
+  payslip and are reported; while locked, attendance on its dates, approved leave overlapping it, published holidays
+  on its dates and salaries effective on or before its last day are refused; reopening needs a 5–500 character reason;
+  relocking issues version n+1 and keeps earlier versions; employees see only the current version of locked months.
+- Employee deletion is refused when the employee has payslips or attendance in a locked month (set inactive instead).
+- Edge Function: `admin_payroll_lock`, `admin_payroll_reopen`, `payslip_list` / `payslip_get` (own only),
+  `admin_payslip_get` (any version); `admin_payroll_month` shows frozen payslip figures and lock history for locked
+  months. Attendance, leave, holiday, salary and employee-deletion handlers check the lock first and return
+  HTTP 409 `payroll_month_locked` before changing anything.
+- Payslip PDF (web `src/lib/payslipPdf.ts`, Android `PayslipPdfGenerator`): company letterhead background; company
+  name; employee name, ID, designation, department; month; working and paid days; gross; absences, LOP leave and
+  late marks in days and amount; total deductions; net pay. Amounts use "Rs." (standard PDF fonts have no ₹ glyph)
+  with Indian digit grouping.
+- Web: Payroll page Lock / Reopen (reason) / Export CSV / per-employee payslip PDF / lock history; employee
+  **Payslips** list on the Monthly page. Android: **Payslips** section on the Monthly screen with in-app PDF viewer
+  and share; the PDF file is deleted when the viewer closes.
+
+Verification (staging only): 38 SQL tests (locking, versions, every guard, reopen/relock, deletion protection, RLS),
+30 HTTP checks through the deployed function (27 passed first time; the 3 misses were test expectations that assumed
+26 working days while staging has a published holiday on 21 Sep — figures verified as correct), web payslip PDF
+rendered and inspected, Android unit tests (40) and debug/release/staging builds. The Android PDF layout has not been
+viewed on a device yet.
+
+## 12. Out of scope
 
 Statutory deductions (PF, ESI, PT, TDS), fixed deductions, one-off adjustments/bonuses, leaving dates, waiving
 late marks, half-day rules for short hours, multiple branches, bank payment files.
 
-## 12. Decision log
+## 13. Decision log
 
 | # | Decision |
 | :-- | :--- |
@@ -253,3 +282,4 @@ late marks, half-day rules for short hours, multiple branches, bank payment file
 | 15 | Shift changes affect future days only |
 | 16 | Month close with lock, reopen (reason, logged), versioned payslips; locked-month edits refused |
 | 17 | Built on `feature/office-geofencing`; staging project only |
+| 18 | Payslip on the company letterhead with company, employee details, month, working/paid days, gross, itemised deductions and net; no bank details, logo or signature line |

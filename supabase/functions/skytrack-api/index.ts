@@ -422,6 +422,22 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleAdminGeofenceSettings(employee);
     }
 
+    if (action === "admin_payroll_lock") {
+      return await handleAdminPayrollLock(employee, body);
+    }
+
+    if (action === "admin_payroll_reopen") {
+      return await handleAdminPayrollReopen(employee, body);
+    }
+
+    if (action === "payslip_list" || action === "payslip_get") {
+      return await handleMyPayslips(employee, action === "payslip_get" ? body : {});
+    }
+
+    if (action === "admin_payslip_get") {
+      return await handleAdminPayslipGet(employee, body);
+    }
+
     if (action === "admin_update_employee_details") {
       return await handleAdminUpdateEmployeeDetails(employee, body);
     }
@@ -2314,6 +2330,7 @@ async function handleAdminSalarySave(employee: any, body: any): Promise<Response
   if (error) {
     console.error("admin_salary_save error:", error);
     if (error.code === "42501") return payrollForbiddenResponse();
+    if (isPayrollLockError(error)) return payrollLockErrorResponse(error);
     if (error.code === "23514") {
       return privateJson({ success: false, error: "invalid_salary", message: "The salary is outside the allowed range." }, 400);
     }
@@ -2340,6 +2357,61 @@ async function handleAdminPayrollMonth(employee: any, body: any): Promise<Respon
   const month = parseMonth(body?.month);
   if (!month) {
     return privateJson({ success: false, error: "invalid_month", message: "Month must be in YYYY-MM format." }, 400);
+  }
+
+  // Run status and lock history
+  const run = await getPayrollRun(month);
+  const { data: eventRows } = await adminClient
+    .from("payroll_run_events")
+    .select("*")
+    .eq("month", `${month}-01`)
+    .order("created_at", { ascending: false });
+  const describeActor = await describeEmployees((eventRows ?? []).map((e: any) => e.actor));
+  const runInfo = {
+    status: run?.status ?? "open",
+    version: run?.current_version ?? 0,
+    lockedAt: run?.status === "locked" ? run.locked_at : null,
+    canLock: run?.status !== "locked" && `${month}-01` < `${getUtcToday().slice(0, 7)}-01`,
+    events: (eventRows ?? []).map((e: any) => ({
+      event: e.event,
+      version: e.version,
+      reason: e.reason ?? null,
+      payslipCount: e.payslip_count ?? null,
+      skipped: e.skipped ?? [],
+      at: e.created_at,
+      by: describeActor(e.actor)
+    }))
+  };
+
+  // Locked month: frozen payslip figures
+  if (run?.status === "locked") {
+    const { data: slips, error: slipsError } = await adminClient
+      .from("payslips")
+      .select("*")
+      .eq("month", `${month}-01`)
+      .eq("version", run.current_version);
+    if (slipsError) {
+      console.error("admin_payroll_month payslips error:", slipsError);
+      return privateJson({ success: false, error: "database_error", message: "Unable to load payroll." }, 500);
+    }
+    const lockEvent = (eventRows ?? []).find((e: any) => e.event === "locked" && e.version === run.current_version);
+    const rows = [
+      ...(slips ?? []).map((row: any) => {
+        const p = formatPayslip(row);
+        const { days: _days, ...summary } = p.salary;
+        return {
+          employee: { ...p.employee, status: "active", joiningDate: null },
+          salary: summary,
+          payslip: { payslipNumber: p.payslipNumber, version: p.version, generatedAt: p.generatedAt }
+        };
+      }),
+      ...((lockEvent?.skipped ?? []) as any[]).map((sk: any) => ({
+        employee: { id: sk.employee_id, employeeId: sk.employee_id, name: sk.name, designation: null, status: "active", joiningDate: null },
+        salary: { status: sk.status, flags: [] },
+        payslip: null
+      }))
+    ].sort((a: any, b: any) => String(a.employee.name).localeCompare(String(b.employee.name)));
+    return privateJson({ success: true, month, asOf: run.locked_at, run: runInfo, rows });
   }
 
   const [year, monthNumber] = month.split("-").map(Number);
@@ -2387,7 +2459,224 @@ async function handleAdminPayrollMonth(employee: any, body: any): Promise<Respon
     };
   }));
 
-  return privateJson({ success: true, month, asOf: getUtcToday(), rows });
+  return privateJson({ success: true, month, asOf: getUtcToday(), run: runInfo, rows });
+}
+
+// =============================================================
+// MONTH CLOSE & PAYSLIPS (docs/PAYROLL_PLAN.md, Phase 2)
+// lock_payroll_month() freezes every employee's figures into versioned payslips; while a month is
+// locked the database refuses changes that would alter its pay (SQLSTATE 'PLOCK'). Handlers check
+// first so admins get a clear 409 instead of a partial change.
+// =============================================================
+
+function monthLabel(month: string): string {
+  return new Date(`${month.slice(0, 7)}-01T12:00:00Z`).toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  });
+}
+
+/** First locked payroll month overlapping [from, to] as "YYYY-MM", or null. */
+async function lockedPayrollMonth(from: string, to: string = from): Promise<string | null> {
+  if (!isValidIsoDate(from) || !isValidIsoDate(to)) return null;
+  const { data, error } = await adminClient.rpc("payroll_locked_month_between", { p_from: from, p_to: to });
+  if (error) {
+    // The database guard still enforces the lock
+    console.error("payroll_locked_month_between failed:", error);
+    return null;
+  }
+  return data ? String(data).slice(0, 7) : null;
+}
+
+function payrollLockedResponse(month: string): Response {
+  return json({
+    success: false,
+    error: "payroll_month_locked",
+    month,
+    message: `Payroll for ${monthLabel(month)} is locked. Reopen it on the Payroll page before making changes.`
+  }, 409);
+}
+
+function isPayrollLockError(error: any): boolean {
+  return error?.code === "PLOCK";
+}
+
+function payrollLockErrorResponse(error: any): Response {
+  return json({
+    success: false,
+    error: "payroll_month_locked",
+    message: String(error?.message ?? "This payroll month is locked.")
+  }, 409);
+}
+
+function formatPayslip(row: any) {
+  const snapshot = row?.snapshot ?? {};
+  const employeeInfo = snapshot.employee ?? {};
+  return {
+    payslipNumber: row.payslip_number,
+    month: String(row.month).slice(0, 7),
+    version: Number(row.version),
+    generatedAt: row.generated_at,
+    companyName: snapshot.company_name ?? null,
+    employee: {
+      id: employeeInfo.id ?? row.employee_id,
+      employeeId: employeeInfo.employee_id ?? null,
+      name: employeeInfo.name ?? null,
+      designation: employeeInfo.designation ?? null,
+      department: employeeInfo.department ?? null
+    },
+    salary: { ...formatPayrollResult(snapshot), provisional: false }
+  };
+}
+
+async function getPayrollRun(month: string) {
+  const { data } = await adminClient
+    .from("payroll_runs")
+    .select("*")
+    .eq("month", `${month}-01`)
+    .maybeSingle();
+  return data ?? null;
+}
+
+async function handleAdminPayrollLock(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) return payrollForbiddenResponse();
+  const month = typeof body?.month === "string" ? body.month.trim() : "";
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return json({ success: false, error: "invalid_month", message: "Month must be in YYYY-MM format." }, 400);
+  }
+
+  const { data, error } = await adminClient.rpc("lock_payroll_month", { p_admin_id: employee.id, p_month: `${month}-01` });
+  if (error) {
+    console.error("admin_payroll_lock error:", error);
+    if (error.code === "42501") return payrollForbiddenResponse();
+    if (error.code === "PLOCK" || error.code === "22023") {
+      return json({ success: false, error: error.code === "PLOCK" ? "already_locked" : "cannot_lock", message: error.message }, error.code === "PLOCK" ? 409 : 400);
+    }
+    return json({ success: false, error: "database_error", message: "Unable to lock payroll." }, 500);
+  }
+
+  const skipped = (data?.skipped ?? []) as any[];
+  return json({
+    success: true,
+    message: `Payroll for ${monthLabel(month)} locked. ${data?.payslip_count ?? 0} payslip(s) issued (version ${data?.version}).` +
+      (skipped.length ? ` ${skipped.length} employee(s) without a payslip.` : ""),
+    month,
+    version: data?.version ?? null,
+    payslipCount: data?.payslip_count ?? 0,
+    skipped
+  });
+}
+
+async function handleAdminPayrollReopen(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) return payrollForbiddenResponse();
+  const month = typeof body?.month === "string" ? body.month.trim() : "";
+  const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return json({ success: false, error: "invalid_month", message: "Month must be in YYYY-MM format." }, 400);
+  }
+  if (reason.length < 5 || reason.length > 500) {
+    return json({ success: false, error: "reason_required", message: "Enter a reason of 5 to 500 characters to reopen payroll." }, 400);
+  }
+
+  const { data, error } = await adminClient.rpc("reopen_payroll_month", {
+    p_admin_id: employee.id,
+    p_month: `${month}-01`,
+    p_reason: reason
+  });
+  if (error) {
+    console.error("admin_payroll_reopen error:", error);
+    if (error.code === "42501") return payrollForbiddenResponse();
+    if (error.code === "22023") return json({ success: false, error: "cannot_reopen", message: error.message }, 400);
+    return json({ success: false, error: "database_error", message: "Unable to reopen payroll." }, 500);
+  }
+
+  return json({
+    success: true,
+    message: `Payroll for ${monthLabel(month)} reopened. Make corrections, then lock it again to issue version ${Number(data?.version ?? 0) + 1}.`,
+    month,
+    version: data?.version ?? null
+  });
+}
+
+// Employee: own payslips for locked months (current version only)
+async function handleMyPayslips(employee: any, body: any): Promise<Response> {
+  const { data: runs, error: runsError } = await adminClient
+    .from("payroll_runs")
+    .select("month, current_version")
+    .eq("status", "locked");
+  if (runsError) {
+    console.error("payslip_list runs error:", runsError);
+    return privateJson({ success: false, error: "database_error", message: "Unable to load payslips." }, 500);
+  }
+  const current = new Map((runs ?? []).map((r: any) => [String(r.month).slice(0, 10), Number(r.current_version)]));
+  if (current.size === 0) {
+    return privateJson({ success: true, payslips: [] });
+  }
+
+  const requested = typeof body?.month === "string" && body.month.trim() ? body.month.trim() : null;
+  let query = adminClient
+    .from("payslips")
+    .select("*")
+    .eq("employee_id", employee.id)
+    .in("month", Array.from(current.keys()))
+    .order("month", { ascending: false });
+  if (requested) query = query.eq("month", `${requested}-01`);
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("payslip_list error:", error);
+    return privateJson({ success: false, error: "database_error", message: "Unable to load payslips." }, 500);
+  }
+
+  const payslips = (data ?? [])
+    .filter((row: any) => current.get(String(row.month).slice(0, 10)) === Number(row.version))
+    .map(formatPayslip);
+
+  if (requested) {
+    return payslips.length
+      ? privateJson({ success: true, payslip: payslips[0] })
+      : privateJson({ success: false, error: "payslip_not_found", message: "No payslip is available for that month." }, 404);
+  }
+
+  return privateJson({
+    success: true,
+    payslips: payslips.map((p: any) => ({
+      payslipNumber: p.payslipNumber,
+      month: p.month,
+      version: p.version,
+      generatedAt: p.generatedAt,
+      netPay: p.salary.netPay
+    }))
+  });
+}
+
+async function handleAdminPayslipGet(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) return payrollForbiddenResponse();
+  const target = await findEmployeeByIdOrCode(body?.employeeId ?? body?.employee_id);
+  const month = typeof body?.month === "string" ? body.month.trim() : "";
+  if (!target || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return privateJson({ success: false, error: "invalid_request", message: "Employee and month (YYYY-MM) are required." }, 400);
+  }
+
+  let query = adminClient
+    .from("payslips")
+    .select("*")
+    .eq("employee_id", target.id)
+    .eq("month", `${month}-01`)
+    .order("version", { ascending: false });
+  const version = toFiniteNumber(body?.version);
+  if (Number.isInteger(version)) query = query.eq("version", version);
+
+  const { data, error } = await query.limit(1).maybeSingle();
+  if (error) {
+    console.error("admin_payslip_get error:", error);
+    return privateJson({ success: false, error: "database_error", message: "Unable to load the payslip." }, 500);
+  }
+  if (!data) {
+    return privateJson({ success: false, error: "payslip_not_found", message: "No payslip for that employee and month." }, 404);
+  }
+  return privateJson({ success: true, payslip: formatPayslip(data) });
 }
 
 // =============================================================
@@ -2849,6 +3138,20 @@ async function handleDeletePublicHoliday(employee: any, body: any) {
       }
     }
 
+    // Refuse while the payroll month of any matched holiday is locked
+    if (idsToDelete.size > 0 || date) {
+      const { data: holidayRows } = await adminClient
+        .from("public_holidays")
+        .select("holiday_date")
+        .in("id", Array.from(idsToDelete).length ? Array.from(idsToDelete) : ["00000000-0000-0000-0000-000000000000"]);
+      const datesToCheck = new Set<string>((holidayRows ?? []).map((h: any) => String(h.holiday_date).slice(0, 10)));
+      if (date) datesToCheck.add(String(date).slice(0, 10));
+      for (const d of datesToCheck) {
+        const lockedForDelete = await lockedPayrollMonth(d);
+        if (lockedForDelete) return payrollLockedResponse(lockedForDelete);
+      }
+    }
+
     // 1. Delete associated branches first
     for (const hid of idsToDelete) {
       await adminClient
@@ -2922,6 +3225,17 @@ async function handleSavePublicHoliday(employee: any, body: any) {
 
     if (!name || !date) {
       return json({ success: false, message: "Holiday name and date are required." }, 400);
+    }
+
+    // Holidays change working days: refuse while the payroll month is locked (old and new date)
+    const holidayDates = [String(date).slice(0, 10)];
+    if (id) {
+      const { data: existingHoliday } = await adminClient.from("public_holidays").select("holiday_date").eq("id", id).maybeSingle();
+      if (existingHoliday?.holiday_date) holidayDates.push(String(existingHoliday.holiday_date).slice(0, 10));
+    }
+    for (const d of holidayDates) {
+      const lockedForHoliday = await lockedPayrollMonth(d);
+      if (lockedForHoliday) return payrollLockedResponse(lockedForHoliday);
     }
 
     if (id) {
@@ -3571,6 +3885,10 @@ async function handleApproveLeave(
       }, 404);
     }
 
+    // Approving changes pay for the leave's dates: refuse while that payroll month is locked
+    const lockedForApproval = await lockedPayrollMonth(String(leaveReq.from_date ?? "").slice(0, 10), String(leaveReq.to_date ?? leaveReq.from_date ?? "").slice(0, 10));
+    if (lockedForApproval) return payrollLockedResponse(lockedForApproval);
+
     // 2. Normalize leave type to avoid check constraint violations on employee_leave_balances
     const rawType = String(leaveReq.leave_type ?? "").toLowerCase();
     const isHalfDay = rawType.includes("half");
@@ -3991,6 +4309,13 @@ async function handleCancelLeave(
         message: `Leave request in status '${leaveRecord.status}' cannot be cancelled.`,
         status: leaveRecord.status
       }, 400);
+    }
+
+    // Cancelling an approved leave changes pay: refuse while that payroll month is locked
+    // (checked before the balance refund below so nothing is half-done)
+    if (currentStatus === "approved") {
+      const lockedForCancel = await lockedPayrollMonth(String(leaveRecord.from_date ?? "").slice(0, 10), String(leaveRecord.to_date ?? leaveRecord.from_date ?? "").slice(0, 10));
+      if (lockedForCancel) return payrollLockedResponse(lockedForCancel);
     }
 
     // If the leave was approved, refund the deducted paid leave days from employee's leave balance
@@ -5528,6 +5853,22 @@ async function handleDeleteEmployee(caller: any, body: any, authUser: any): Prom
       }, 403);
     }
 
+    // Payslips and attendance in locked payroll months must be kept: refuse before anything is removed
+    const { data: hasPayrollRecords, error: payrollCheckError } = await adminClient.rpc(
+      "employee_has_payroll_records",
+      { p_employee_id: targetEmployee.id }
+    );
+    if (payrollCheckError || hasPayrollRecords) {
+      if (payrollCheckError) console.error("employee_has_payroll_records failed:", payrollCheckError);
+      return json({
+        success: false,
+        error: "has_payroll_records",
+        message: payrollCheckError
+          ? "Unable to confirm payroll records for this employee. Please try again."
+          : "This employee has issued payslips or locked payroll months and cannot be deleted. Set their status to inactive instead."
+      }, 409);
+    }
+
     // 4. Verify calling admin / super admin password
     const adminEmail = caller.email || authUser?.email;
     if (!adminEmail) {
@@ -6111,6 +6452,9 @@ async function handleAdminUndoCheckout(employee: any, body: any): Promise<Respon
       }, 400);
     }
 
+    const lockedDay = await lockedPayrollMonth(date);
+    if (lockedDay) return payrollLockedResponse(lockedDay);
+
     let employeeDbId = targetEmployeeId;
     const isReqUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetEmployeeId);
     if (!isReqUuid) {
@@ -6207,6 +6551,9 @@ async function handleAdminManualAttendance(employee: any, body: any): Promise<Re
       }, 400);
     }
 
+    const lockedDay = await lockedPayrollMonth(date);
+    if (lockedDay) return payrollLockedResponse(lockedDay);
+
     let employeeDbId = targetEmployeeId;
     const isReqUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetEmployeeId);
     if (!isReqUuid) {
@@ -6263,6 +6610,7 @@ async function handleAdminManualAttendance(employee: any, body: any): Promise<Re
         .single();
 
       if (updateError) {
+        if (isPayrollLockError(updateError)) return payrollLockErrorResponse(updateError);
         return json({ success: false, error: "update_failed", message: updateError.message }, 500);
       }
       resultRecord = updated;
@@ -6285,6 +6633,7 @@ async function handleAdminManualAttendance(employee: any, body: any): Promise<Re
         .single();
 
       if (insertError) {
+        if (isPayrollLockError(insertError)) return payrollLockErrorResponse(insertError);
         return json({ success: false, error: "insert_failed", message: insertError.message }, 500);
       }
       resultRecord = inserted;
