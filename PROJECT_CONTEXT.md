@@ -306,6 +306,7 @@ Development uses the staging Supabase project only.
 **Next steps:** production rollout order and rollback in [docs/PRODUCTION_ROLLOUT.md](docs/PRODUCTION_ROLLOUT.md);
 after go-live, the monthly Google Sheets archive in [docs/GOOGLE_SHEETS_EXPORT.md](docs/GOOGLE_SHEETS_EXPORT.md)
 (planned, not built).
+
 ---
 
 ## 5. Critical Guidelines & Gotchas for AI Agents
