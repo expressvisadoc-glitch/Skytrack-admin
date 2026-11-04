@@ -81,10 +81,19 @@ export function Login({ onLoginSuccess }: LoginProps) {
       <header className="relative z-20 w-full h-20 px-6 lg:px-12 flex items-center justify-between border-b border-slate-200/80 bg-white/90 backdrop-blur-xl shadow-xs">
         {/* Left: Brand Wordmark and Emblem */}
         <div className="flex items-center gap-3.5">
-          <div className="relative flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 shadow-md shadow-red-500/25 ring-4 ring-red-50 text-white font-extrabold text-lg cursor-pointer transition-transform hover:scale-105">
+          <button
+            type="button"
+            onClick={() => {
+              window.history.pushState(null, '', '/')
+              window.dispatchEvent(new PopStateEvent('popstate'))
+            }}
+            aria-label="Back to the SkyTrack home page"
+            title="Back to home"
+            className="relative flex items-center justify-center w-11 h-11 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 shadow-md shadow-red-500/25 ring-4 ring-red-50 text-white font-extrabold text-lg cursor-pointer transition-transform hover:scale-105"
+          >
             S
             <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 ring-2 ring-white"></div>
-          </div>
+          </button>
           <div className="flex flex-col">
             <div className="flex items-center gap-2">
               <span className="font-bold text-slate-900 tracking-tight text-base leading-none">SkyTrack</span>

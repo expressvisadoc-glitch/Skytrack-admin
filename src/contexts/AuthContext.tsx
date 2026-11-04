@@ -90,7 +90,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       sessionStorage.removeItem(STORAGE_KEY)
       sessionStorage.removeItem(LEGACY_STORAGE_KEY)
       setSession(null)
-      if (window.location.pathname !== '/login' && window.location.pathname !== '/') {
+      if (window.location.pathname !== '/login') {
         window.history.pushState(null, '', '/login')
       }
     }
@@ -224,7 +224,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     sessionStorage.removeItem(STORAGE_KEY)
     sessionStorage.removeItem(LEGACY_STORAGE_KEY)
     setSession(null)
-    if (window.location.pathname !== '/login' && window.location.pathname !== '/') {
+    // Signing out always ends on the login screen ("/" is the public landing page when signed out)
+    if (window.location.pathname !== '/login') {
       window.history.pushState(null, '', '/login')
     }
   }

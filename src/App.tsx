@@ -9,6 +9,7 @@ import { PublicHolidays } from './components/PublicHolidays'
 import { Settings } from './components/Settings'
 import { Organization } from './components/Organization'
 import { Login } from './components/Login'
+import { Landing } from './components/Landing'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AdminManagement } from './components/AdminManagement'
 import { OfficeGeofence } from './components/OfficeGeofence'
@@ -68,6 +69,8 @@ function App() {
   const { session, isAdmin, isLoading } = useAuth()
   const [activeTab, setActiveTab] = useState<string>(() => getInitialTab(isAdmin))
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  // Re-render on Back/Forward and in-app navigation between the landing page and the login screen
+  const [, setNavCount] = useState(0)
 
   // Reconcile initial tab whenever auth role resolves
   useEffect(() => {
@@ -77,10 +80,18 @@ function App() {
   useEffect(() => {
     const onPopState = () => {
       setActiveTab(getInitialTab(isAdmin))
+      setNavCount((n) => n + 1)
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [isAdmin])
+
+  // After signing in from /login, show the portal's own address instead of /login
+  useEffect(() => {
+    if (session && window.location.pathname === '/login') {
+      window.history.replaceState(null, '', '/' + window.location.search)
+    }
+  }, [session])
 
   if (isLoading) {
     return (
@@ -94,7 +105,8 @@ function App() {
   }
 
   if (!session) {
-    return <Login onLoginSuccess={() => {}} />
+    // Signed-out visitors see the public landing page at "/" and the login screen everywhere else
+    return window.location.pathname === '/' ? <Landing /> : <Login onLoginSuccess={() => {}} />
   }
 
   const handleSelectTab = (tab: string) => {
