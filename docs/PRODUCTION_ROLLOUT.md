@@ -1,11 +1,11 @@
-# Production Rollout — Geofencing, Security Fix and Payroll
+# Production Rollout — Geofencing, Security Fix, Payroll and Notifications
 
 Status: **prepared, not started.** Everything below has been tested on the staging project only.
 Nothing in this guide is done automatically; each production step needs your go-ahead.
 
 | Repo | Branch to release | Contains |
 | :--- | :--- | :--- |
-| `skytrack-admin` | `feature/payroll` (includes `feature/office-geofencing` and `main`) | Web app, Edge Function, 5 migrations |
+| `skytrack-admin` | `feature/payroll` (includes `feature/office-geofencing` and `main`) | Web app, Edge Function, 6 migrations |
 | `SkyTrack_01` | `feature/payroll` (includes `feature/office-geofencing`) | Android app |
 
 ## 1. Why the order matters
@@ -34,7 +34,9 @@ So: **release the Android app first**, then in one short session **back up → m
    1. Merge `feature/payroll` → `development` → `main` (Android repo), resolving the stashed "reporting manager" WIP
       separately.
    2. Check `versionCode` **3** / `versionName` **1.1.0** in `app/build.gradle.kts` (already set on `feature/payroll`).
-   3. Build the release APK (`./gradlew assembleRelease`). Note: release builds are currently signed with the
+   3. Complete the Firebase setup ([NOTIFICATIONS.md](NOTIFICATIONS.md) §5, steps 1–5) so the Firebase lines are in
+      `~/.gradle/gradle.properties`, then build the release APK (`./gradlew assembleRelease`). Without them the app
+      still works but never receives pushes. Note: release builds are currently signed with the
       **debug key** (`signingConfig = signingConfigs.getByName("debug")`); keep it the same so the update installs
       over the existing app.
    4. Publish a GitHub Release (the in-app update checker reads `expressvisadoc-glitch/Skytrack` releases).
@@ -49,18 +51,20 @@ installed (`/opt/homebrew/opt/libpq/bin`).
 | :-- | :--- | :--- | :--- |
 | 1 | **Full backup** (data + schema) | `pg_dump "$PROD_DB_URL" -Fc --schema=public -f ~/skytrack-backups/prod_$(date +%Y%m%d_%H%M).dump` and copy it to Google Drive | File size > 0; `pg_restore -l` lists tables |
 | 2 | Save the current Edge Function | `git -C skytrack-admin show 24fb01b:supabase/functions/skytrack-api/index.ts > ~/skytrack-backups/edge_function_before_rollout.ts` | File saved (needed for rollback) |
-| 3 | **Migrations**, in this order, each in one transaction | `psql "$PROD_DB_URL" -X -1 -v ON_ERROR_STOP=1 -f <file>` for: `20261025000000_office_geofence.sql`, `20261027000000_payroll_foundations.sql`, `20261027010000_payroll_salaries.sql`, `20261027020000_rls_hardening.sql`, `20261027030000_payroll_runs.sql` | Each prints no `ERROR`; `NOTICE … does not exist, skipping` is normal. The first migration stops safely if the attendance functions differ from what it expects. |
+| 3 | **Migrations**, in this order, each in one transaction | `psql "$PROD_DB_URL" -X -1 -v ON_ERROR_STOP=1 -f <file>` for: `20261025000000_office_geofence.sql`, `20261027000000_payroll_foundations.sql`, `20261027010000_payroll_salaries.sql`, `20261027020000_rls_hardening.sql`, `20261027030000_payroll_runs.sql`, `20261028000000_notifications.sql` | Each prints no `ERROR`; `NOTICE … does not exist, skipping` is normal. The first migration stops safely if the attendance functions differ from what it expects. |
 | 4 | **Edge Function** | Dashboard → Edge Functions → `skytrack-api` → paste `supabase/functions/skytrack-api/index.ts` from `feature/payroll` → Deploy (the CLI token was refused for production; a token with production access can use `npx supabase functions deploy skytrack-api --project-ref cwtrrtbodqctntkpnjlv --no-verify-jwt --use-api`). **JWT verification must stay off.** | Login still works on web and phone |
+| 4b | **Notification secrets** | Dashboard → Edge Functions → Secrets: `NOTIFICATIONS_DISPATCH_SECRET` (`openssl rand -hex 32`) and `FCM_SERVICE_ACCOUNT_JSON`. SQL editor: the two `vault.create_secret` lines from [NOTIFICATIONS.md](NOTIFICATIONS.md) §3 with the production URL and the same secret | `select jobname from cron.job` lists `skytrack-notifications` |
 | 5 | **Web app** | Merge `feature/payroll` → `main` in `skytrack-admin` and deploy as usual (Cloudflare) | Admin sidebar shows Office Geofence, Payroll, Payroll Settings |
 | 6 | **Configure the office** (check-in is blocked until this is done) | Admin → Office Geofence: real coordinates, radius 100 m, max accuracy 50 m, Active | Saved, ACTIVE badge |
-| 7 | Review **Payroll Settings** | Defaults: Sunday off, grace 0, 2 late marks = 0.5 day, Asia/Kolkata | Saved |
+| 7 | Review **Payroll Settings** | Defaults: Sunday off, grace 0, 2 late marks = 0.5 day, allowed break 60 min, Asia/Kolkata | Saved |
 | 8 | **Salaries** (can be done the next day) | Employees → each employee → Salary → Change Salary (effective from the 1st of the first payroll month) | Payroll page shows no "Salary not set" flags |
-| 9 | **Smoke test** | One employee checks in/out at the office (phone); one attempt from outside is refused; admin opens Payroll and Employee Details; an employee opens the salary card | All as expected |
+| 9 | **Smoke test** | One employee checks in/out at the office (phone); one attempt from outside is refused; admin opens Payroll and Employee Details; an employee opens the salary card; send the test push from [NOTIFICATIONS.md](NOTIFICATIONS.md) §5 step 8 to one employee | All as expected; push arrives and shows in the bell inbox |
 
 ## 4. Rollback
 
 | Problem | Action |
 | :--- | :--- |
+| Too many / wrong notifications | `select cron.unschedule('skytrack-notifications');` stops all scheduled reminders at once (event notifications still go to the inbox; delete the Vault secrets to stop pushes). Re-enable with the `cron.schedule` line from the migration. |
 | Check-in / attendance broken | Redeploy `~/skytrack-backups/edge_function_before_rollout.ts` (step 2). The old function works with the new tables in place. |
 | Web app broken | Roll back the Cloudflare deployment / revert the merge on `main`. With `rls_hardening` applied, the old web app cannot edit employee details or shift times until the new one is back. |
 | Data damaged | Restore from the step 1 dump (`pg_restore`) — last resort; ask for help first. |

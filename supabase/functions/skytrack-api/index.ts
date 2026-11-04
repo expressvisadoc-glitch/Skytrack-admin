@@ -249,6 +249,11 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handlePublicHolidays();
     }
 
+    // Called by pg_cron (public.notifications_request_dispatch) with the shared dispatch secret
+    if (action === "notifications_dispatch") {
+      return await handleNotificationsDispatch(req);
+    }
+
     // =========================================================
     // AUTHENTICATION
     // =========================================================
@@ -408,6 +413,26 @@ async function handleRequest(req: Request): Promise<Response> {
 
     if (action === "resume_work" || action === "end_break") {
       return await handleResumeWork(employee, body);
+    }
+
+    // =========================================================
+    // NOTIFICATIONS
+    // =========================================================
+
+    if (action === "device_register") {
+      return await handleDeviceRegister(employee, body);
+    }
+
+    if (action === "device_unregister") {
+      return await handleDeviceUnregister(employee, body);
+    }
+
+    if (action === "notifications_list") {
+      return await handleNotificationsList(employee, body);
+    }
+
+    if (action === "notifications_mark_read") {
+      return await handleNotificationsMarkRead(employee, body);
     }
 
     // =========================================================
@@ -1118,6 +1143,8 @@ async function handleStartWork(
   }
 
   const totalBreakSec = attendance.total_break_seconds ?? (attendance.break_minutes ? attendance.break_minutes * 60 : 0);
+
+  await notifyLateCheckIn(employee.id);
 
   return json({
     success: true,
@@ -1913,6 +1940,7 @@ const PAYROLL_POLICY_LIMITS = {
   lateGraceMinutes: { min: 0, max: 240 },
   lateMarksPerUnit: { min: 1, max: 31 },
   lateLopDaysPerUnit: { min: 0.01, max: 1 },
+  maxBreakMinutes: { min: 5, max: 480 },
   maxWeekOffDays: 6
 };
 
@@ -1940,6 +1968,8 @@ function formatPayrollPolicy(row: any) {
     lateMarksPerUnit: Number(row?.late_marks_per_unit),
     lateLopDaysPerUnit: Number(row?.late_lop_days_per_unit),
     officeTimezone: row?.office_timezone ?? null,
+    // Only used for the "break exceeded" reminder; it does not change pay
+    maxBreakMinutes: row?.max_break_minutes == null ? null : Number(row.max_break_minutes),
     updatedAt: row?.updated_at ?? null
   };
 }
@@ -2050,8 +2080,10 @@ function validatePayrollPolicyInput(body: any): { errors: string[]; value: any }
   const marksPerUnit = toFiniteNumber(input?.lateMarksPerUnit ?? input?.late_marks_per_unit);
   const lopPerUnit = toFiniteNumber(input?.lateLopDaysPerUnit ?? input?.late_lop_days_per_unit);
   const timezone = input?.officeTimezone ?? input?.office_timezone;
+  const rawMaxBreak = input?.maxBreakMinutes ?? input?.max_break_minutes;
+  const maxBreak = rawMaxBreak === undefined || rawMaxBreak === null ? undefined : toFiniteNumber(rawMaxBreak);
 
-  const { lateGraceMinutes, lateMarksPerUnit, lateLopDaysPerUnit } = PAYROLL_POLICY_LIMITS;
+  const { lateGraceMinutes, lateMarksPerUnit, lateLopDaysPerUnit, maxBreakMinutes } = PAYROLL_POLICY_LIMITS;
   if (!Number.isInteger(grace) || grace < lateGraceMinutes.min || grace > lateGraceMinutes.max) {
     errors.push(`Late grace must be a whole number from ${lateGraceMinutes.min} to ${lateGraceMinutes.max} minutes.`);
   }
@@ -2069,6 +2101,9 @@ function validatePayrollPolicyInput(body: any): { errors: string[]; value: any }
   if (typeof timezone !== "string" || !timezone.trim() || !isKnownTimezone(timezone.trim())) {
     errors.push("Office timezone must be a valid IANA timezone such as Asia/Kolkata.");
   }
+  if (maxBreak !== undefined && (!Number.isInteger(maxBreak) || maxBreak < maxBreakMinutes.min || maxBreak > maxBreakMinutes.max)) {
+    errors.push(`Allowed break must be a whole number from ${maxBreakMinutes.min} to ${maxBreakMinutes.max} minutes.`);
+  }
 
   return {
     errors,
@@ -2077,7 +2112,8 @@ function validatePayrollPolicyInput(body: any): { errors: string[]; value: any }
       grace,
       marksPerUnit,
       lopPerUnit,
-      timezone: typeof timezone === "string" ? timezone.trim() : null
+      timezone: typeof timezone === "string" ? timezone.trim() : null,
+      maxBreak
     }
   };
 }
@@ -2097,6 +2133,17 @@ async function handleAdminSavePayrollPolicy(employee: any, body: any): Promise<R
     }, 400);
   }
 
+  // Clients that do not send the allowed break keep the current value
+  let maxBreak = value.maxBreak;
+  if (maxBreak === undefined) {
+    const { data: current } = await adminClient
+      .from("payroll_policy")
+      .select("max_break_minutes")
+      .eq("id", 1)
+      .maybeSingle();
+    maxBreak = current?.max_break_minutes ?? 60;
+  }
+
   const { data, error } = await adminClient.rpc(
     "save_payroll_policy",
     {
@@ -2105,7 +2152,8 @@ async function handleAdminSavePayrollPolicy(employee: any, body: any): Promise<R
       p_late_grace_minutes: value.grace,
       p_late_marks_per_unit: value.marksPerUnit,
       p_late_lop_days_per_unit: value.lopPerUnit,
-      p_office_timezone: value.timezone
+      p_office_timezone: value.timezone,
+      p_max_break_minutes: maxBreak
     }
   );
 
@@ -6191,6 +6239,17 @@ async function handleSuperAdminChangeEmployeePassword(
         .eq("id", targetEmployee.id);
     }
 
+    if (targetEmployee.id !== caller.id) {
+      await createNotification(
+        targetEmployee.id,
+        "password_changed",
+        "Password changed",
+        "Your password was changed by an administrator. If you did not expect this, contact HR.",
+        { screen: "profile" },
+        `S1:${Date.now()}`
+      );
+    }
+
     return json({
       success: true,
       message: `Password for ${targetEmployee.name || targetEmployee.employee_id} has been updated successfully.`
@@ -6519,6 +6578,8 @@ async function handleAdminUndoCheckout(employee: any, body: any): Promise<Respon
       }, 500);
     }
 
+    await notifyAttendanceEditedByAdmin(employee, updated?.employee_id, date);
+
     return json({
       success: true,
       message: "Check-out undone successfully. Employee is now marked in progress.",
@@ -6646,6 +6707,8 @@ async function handleAdminManualAttendance(employee: any, body: any): Promise<Re
       .eq("id", resultRecord.id)
       .maybeSingle();
 
+    await notifyAttendanceEditedByAdmin(employee, resultRecord.employee_id, date);
+
     return json({
       success: true,
       message: "Attendance recorded successfully.",
@@ -6659,6 +6722,514 @@ async function handleAdminManualAttendance(employee: any, body: any): Promise<Re
       message: error instanceof Error ? error.message : "Failed to record attendance."
     }, 500);
   }
+}
+
+// =============================================================
+// NOTIFICATIONS (docs/NOTIFICATIONS.md)
+// public.notifications rows come from database triggers, the pg_cron tick (notifications_tick) and the
+// hooks below. Employee rows are pushed to phones through Firebase Cloud Messaging by
+// notifications_dispatch, which pg_cron calls with the shared dispatch secret. Admin rows are shown only
+// in the web bell panel. Every hook is best effort: a notification failure never fails the action.
+// =============================================================
+
+const NOTIFICATION_LIMITS = {
+  pageSize: 30,
+  maxPageSize: 100,
+  maxPushAttempts: 3,
+  dispatchBatch: 100,
+  maxDevicesPerEmployee: 5,
+  maxIdsPerRequest: 200
+};
+const NOTIFICATION_TYPE_PATTERN = /^[a-z_]{1,40}$/;
+
+async function createNotification(
+  recipientId: string,
+  type: string,
+  title: string,
+  body: string,
+  data: Record<string, unknown>,
+  dedupeKey: string
+): Promise<void> {
+  try {
+    const { error } = await adminClient.rpc("notify", {
+      p_recipient: recipientId,
+      p_audience: "employee",
+      p_type: type,
+      p_title: title,
+      p_body: body,
+      p_data: data,
+      p_dedupe: dedupeKey
+    });
+    if (error) {
+      console.error(`notify ${type} error:`, error);
+    }
+  } catch (err) {
+    console.error(`notify ${type} failed:`, err);
+  }
+}
+
+// A3 / A4: late check-in and "one more late mark" (decided in the database from the late mark)
+async function notifyLateCheckIn(employeeId: string): Promise<void> {
+  try {
+    const { error } = await adminClient.rpc("notify_late_check_in", { p_employee_id: employeeId });
+    if (error) {
+      console.error("notify_late_check_in error:", error);
+    }
+  } catch (err) {
+    console.error("notify_late_check_in failed:", err);
+  }
+}
+
+// A9: an admin entered or changed the employee's attendance
+async function notifyAttendanceEditedByAdmin(admin: any, recipientId: string | null | undefined, date: string) {
+  if (!recipientId || recipientId === admin.id || !isValidIsoDate(date)) {
+    return;
+  }
+  const label = new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  // One notification per day edited within 10 minutes, so a series of corrections is not repeated
+  const bucket = Math.floor(Date.now() / 600000);
+  await createNotification(
+    recipientId,
+    "attendance_updated",
+    "Attendance updated",
+    `Your attendance for ${label} was updated by an admin.`,
+    { screen: "monthly", date },
+    `A9:${date}:${bucket}`
+  );
+}
+
+function formatNotification(row: any) {
+  return {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    body: row.body,
+    data: row.data ?? {},
+    createdAt: row.created_at,
+    readAt: row.read_at ?? null
+  };
+}
+
+// Employees read their own notifications; admins can also read the admin feed (audience "admin")
+function resolveNotificationAudience(employee: any, body: any): "employee" | "admin" | null {
+  const audience = String(body?.audience ?? "employee");
+  if (audience === "employee") return "employee";
+  if (audience === "admin" && isAdminRole(employee)) return "admin";
+  return null;
+}
+
+function parseNotificationTypes(value: unknown): string[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 50) return null;
+  const types = value.map((t) => String(t));
+  return types.every((t) => NOTIFICATION_TYPE_PATTERN.test(t)) ? types : null;
+}
+
+async function handleNotificationsList(employee: any, body: any): Promise<Response> {
+  const audience = resolveNotificationAudience(employee, body);
+  if (!audience) {
+    return json({ success: false, error: "forbidden", message: "Only administrators can read admin notifications." }, 403);
+  }
+  const excludeTypes = parseNotificationTypes(body?.excludeTypes);
+  if (excludeTypes === null) {
+    return json({ success: false, error: "invalid_request", message: "excludeTypes must be a list of notification types." }, 400);
+  }
+  const requested = Number(body?.limit ?? NOTIFICATION_LIMITS.pageSize);
+  const limit = Number.isInteger(requested) && requested > 0
+    ? Math.min(requested, NOTIFICATION_LIMITS.maxPageSize)
+    : NOTIFICATION_LIMITS.pageSize;
+  const before = body?.before ? String(body.before) : null;
+  if (before && Number.isNaN(Date.parse(before))) {
+    return json({ success: false, error: "invalid_request", message: "before must be a timestamp." }, 400);
+  }
+
+  let listQuery = adminClient
+    .from("notifications")
+    .select("id, type, title, body, data, created_at, read_at")
+    .eq("recipient_id", employee.id)
+    .eq("audience", audience)
+    .order("created_at", { ascending: false })
+    .limit(limit + 1);
+  let unreadQuery = adminClient
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("recipient_id", employee.id)
+    .eq("audience", audience)
+    .is("read_at", null);
+  if (excludeTypes.length > 0) {
+    const list = `(${excludeTypes.join(",")})`;
+    listQuery = listQuery.not("type", "in", list);
+    unreadQuery = unreadQuery.not("type", "in", list);
+  }
+  if (before) {
+    listQuery = listQuery.lt("created_at", new Date(before).toISOString());
+  }
+
+  const [{ data, error }, { count, error: countError }] = await Promise.all([listQuery, unreadQuery]);
+  if (error || countError) {
+    console.error("notifications_list error:", error ?? countError);
+    return json({ success: false, error: "database_error", message: "Unable to load notifications." }, 500);
+  }
+
+  const rows = data ?? [];
+  return privateJson({
+    success: true,
+    notifications: rows.slice(0, limit).map(formatNotification),
+    unreadCount: count ?? 0,
+    hasMore: rows.length > limit
+  });
+}
+
+async function handleNotificationsMarkRead(employee: any, body: any): Promise<Response> {
+  const audience = resolveNotificationAudience(employee, body);
+  if (!audience) {
+    return json({ success: false, error: "forbidden", message: "Only administrators can read admin notifications." }, 403);
+  }
+  const all = body?.all === true;
+  const ids = Array.isArray(body?.ids) ? body.ids.map((id: unknown) => String(id)) : [];
+  if (!all && (ids.length === 0 || ids.length > NOTIFICATION_LIMITS.maxIdsPerRequest || !ids.every((id: string) => UUID_PATTERN.test(id)))) {
+    return json({ success: false, error: "invalid_request", message: "Send notification ids or all: true." }, 400);
+  }
+
+  let query = adminClient
+    .from("notifications")
+    .update({ read_at: new Date().toISOString() })
+    .eq("recipient_id", employee.id)
+    .eq("audience", audience)
+    .is("read_at", null);
+  if (!all) {
+    query = query.in("id", ids);
+  }
+  const { data, error } = await query.select("id");
+  if (error) {
+    console.error("notifications_mark_read error:", error);
+    return json({ success: false, error: "database_error", message: "Unable to update notifications." }, 500);
+  }
+  return json({ success: true, updated: (data ?? []).length });
+}
+
+async function handleDeviceRegister(employee: any, body: any): Promise<Response> {
+  const token = String(body?.token ?? "").trim();
+  const platform = String(body?.platform ?? "android").trim().toLowerCase();
+  const appVersion = body?.appVersion ?? body?.app_version;
+  if (token.length < 20 || token.length > 4096 || /\s/.test(token)) {
+    return json({ success: false, error: "invalid_token", message: "A valid device token is required." }, 400);
+  }
+  if (platform !== "android") {
+    return json({ success: false, error: "invalid_platform", message: "Only Android devices are supported." }, 400);
+  }
+  if (appVersion !== undefined && appVersion !== null && (typeof appVersion !== "string" || appVersion.length > 40)) {
+    return json({ success: false, error: "invalid_request", message: "appVersion must be text up to 40 characters." }, 400);
+  }
+
+  const now = new Date().toISOString();
+  // A phone signed in by another employee moves to that employee
+  const { error } = await adminClient
+    .from("device_tokens")
+    .upsert({
+      token,
+      employee_id: employee.id,
+      platform,
+      app_version: appVersion ?? null,
+      last_seen_at: now
+    }, { onConflict: "token" });
+  if (error) {
+    console.error("device_register error:", error);
+    return json({ success: false, error: "database_error", message: "Unable to register this device." }, 500);
+  }
+
+  // Keep only the most recent devices per employee
+  const { data: devices } = await adminClient
+    .from("device_tokens")
+    .select("token")
+    .eq("employee_id", employee.id)
+    .order("last_seen_at", { ascending: false });
+  const stale = (devices ?? []).slice(NOTIFICATION_LIMITS.maxDevicesPerEmployee).map((d: any) => d.token);
+  if (stale.length > 0) {
+    await adminClient.from("device_tokens").delete().in("token", stale);
+  }
+
+  return json({ success: true });
+}
+
+async function handleDeviceUnregister(employee: any, body: any): Promise<Response> {
+  const token = String(body?.token ?? "").trim();
+  if (!token) {
+    return json({ success: false, error: "invalid_token", message: "A device token is required." }, 400);
+  }
+  const { error } = await adminClient
+    .from("device_tokens")
+    .delete()
+    .eq("token", token)
+    .eq("employee_id", employee.id);
+  if (error) {
+    console.error("device_unregister error:", error);
+    return json({ success: false, error: "database_error", message: "Unable to unregister this device." }, 500);
+  }
+  return json({ success: true });
+}
+
+// ---------- Push delivery (Firebase Cloud Messaging HTTP v1) ----------
+
+function constantTimeEqual(a: string, b: string): boolean {
+  const left = new TextEncoder().encode(a);
+  const right = new TextEncoder().encode(b);
+  let diff = left.length ^ right.length;
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
+  }
+  return diff === 0;
+}
+
+type FcmAccount = { projectId: string; clientEmail: string; privateKey: string; tokenUri: string };
+
+// Returns the service account, or what is wrong with the secret (never its content)
+function readFcmAccount(): { account: FcmAccount | null; problem: string | null } {
+  const raw = Deno.env.get("FCM_SERVICE_ACCOUNT_JSON")?.trim();
+  if (!raw) return { account: null, problem: "fcm_not_configured" };
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+    // Also accept the JSON pasted as a quoted string
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+  } catch {
+    return { account: null, problem: "fcm_secret_invalid_json" };
+  }
+  const missing = ["project_id", "client_email", "private_key"].filter((k) => !parsed?.[k]);
+  if (missing.length > 0) {
+    return { account: null, problem: `fcm_secret_missing_${missing.join("_")}` };
+  }
+  return {
+    account: {
+      projectId: parsed.project_id,
+      clientEmail: parsed.client_email,
+      privateKey: parsed.private_key,
+      tokenUri: parsed.token_uri || "https://oauth2.googleapis.com/token"
+    },
+    problem: null
+  };
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+let fcmAccessToken: { value: string; expiresAt: number } | null = null;
+
+async function getFcmAccessToken(account: FcmAccount): Promise<string> {
+  if (fcmAccessToken && fcmAccessToken.expiresAt > Date.now() + 60000) {
+    return fcmAccessToken.value;
+  }
+
+  const pem = account.privateKey.replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+  const der = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    der,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const now = Math.floor(Date.now() / 1000);
+  const encoder = new TextEncoder();
+  const header = base64UrlEncode(encoder.encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
+  const claims = base64UrlEncode(encoder.encode(JSON.stringify({
+    iss: account.clientEmail,
+    scope: "https://www.googleapis.com/auth/firebase.messaging",
+    aud: account.tokenUri,
+    iat: now,
+    exp: now + 3600
+  })));
+  const signature = new Uint8Array(
+    await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, encoder.encode(`${header}.${claims}`))
+  );
+  const assertion = `${header}.${claims}.${base64UrlEncode(signature)}`;
+
+  const response = await fetch(account.tokenUri, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.access_token) {
+    throw new Error(`FCM auth failed (${response.status}): ${result.error_description ?? result.error ?? "no token"}`);
+  }
+  fcmAccessToken = {
+    value: result.access_token,
+    expiresAt: Date.now() + Number(result.expires_in ?? 3600) * 1000
+  };
+  return fcmAccessToken.value;
+}
+
+type PushResult = "sent" | "invalid_token" | "retry";
+
+async function sendFcmMessage(
+  account: FcmAccount,
+  accessToken: string,
+  token: string,
+  row: any,
+  employeeCode: string
+): Promise<{ result: PushResult; detail?: string }> {
+  // Data-only message: the app decides whether to show it (the in-app notification setting, and only
+  // while this employee is signed in on the phone)
+  const data: Record<string, string> = {
+    id: String(row.id),
+    employee: employeeCode,
+    type: String(row.type),
+    title: String(row.title),
+    body: String(row.body),
+    screen: String(row.data?.screen ?? "home")
+  };
+  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${account.projectId}/messages:send`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      message: {
+        token,
+        data,
+        android: { priority: "HIGH", ttl: "21600s" }
+      }
+    })
+  });
+  if (response.ok) {
+    return { result: "sent" };
+  }
+  const payload = await response.json().catch(() => ({}));
+  const codes: string[] = (payload?.error?.details ?? []).map((d: any) => d?.errorCode).filter(Boolean);
+  const detail = `${response.status} ${codes.join(",") || payload?.error?.status || ""}`.trim();
+  if (codes.includes("UNREGISTERED") || (response.status === 400 && codes.includes("INVALID_ARGUMENT"))) {
+    return { result: "invalid_token", detail };
+  }
+  if (response.status === 401) {
+    fcmAccessToken = null;
+  }
+  return { result: "retry", detail };
+}
+
+async function handleNotificationsDispatch(req: Request): Promise<Response> {
+  const secret = Deno.env.get("NOTIFICATIONS_DISPATCH_SECRET") ?? "";
+  const provided = req.headers.get("x-skytrack-dispatch-secret") ?? "";
+  if (secret.length < 16 || !constantTimeEqual(provided, secret)) {
+    return json({ success: false, error: "forbidden", message: "Not allowed." }, 403);
+  }
+
+  const { data: claimed, error } = await adminClient.rpc("claim_push_notifications", {
+    p_limit: NOTIFICATION_LIMITS.dispatchBatch
+  });
+  if (error) {
+    console.error("claim_push_notifications error:", error);
+    return json({ success: false, error: "database_error", message: "Unable to read pending notifications." }, 500);
+  }
+  const rows: any[] = claimed ?? [];
+  if (rows.length === 0) {
+    return json({ success: true, sent: 0, skipped: 0, failed: 0 });
+  }
+
+  const finish = (ids: string[], status: string, pushError: string | null) =>
+    ids.length === 0
+      ? Promise.resolve()
+      : adminClient
+        .from("notifications")
+        .update({
+          push_status: status,
+          push_error: pushError,
+          ...(status === "sent" ? { pushed_at: new Date().toISOString() } : {})
+        })
+        .in("id", ids)
+        .then(({ error: updateError }) => {
+          if (updateError) console.error("notification status update error:", updateError);
+        });
+
+  const { account, problem } = readFcmAccount();
+  if (!account) {
+    console.error("Push not sent:", problem);
+    await finish(rows.map((r) => r.id), "skipped", problem);
+    return json({ success: true, sent: 0, skipped: rows.length, failed: 0, reason: problem });
+  }
+
+  const recipientIds = Array.from(new Set(rows.map((r) => r.recipient_id)));
+  const { data: devices } = await adminClient
+    .from("device_tokens")
+    .select("token, employee_id")
+    .in("employee_id", recipientIds);
+  const { data: recipients } = await adminClient
+    .from("employees")
+    .select("id, employee_id")
+    .in("id", recipientIds);
+  const codeByEmployee = new Map<string, string>((recipients ?? []).map((e: any) => [e.id, String(e.employee_id ?? "")]));
+  const tokensByEmployee = new Map<string, string[]>();
+  for (const device of devices ?? []) {
+    const list = tokensByEmployee.get(device.employee_id) ?? [];
+    list.push(device.token);
+    tokensByEmployee.set(device.employee_id, list);
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await getFcmAccessToken(account);
+  } catch (err) {
+    console.error(err);
+    const message = err instanceof Error ? err.message.slice(0, 300) : "fcm_auth_failed";
+    // Leave them pending (retried after the claim lapses) until the attempt limit
+    await finish(rows.filter((r) => r.push_attempts >= NOTIFICATION_LIMITS.maxPushAttempts).map((r) => r.id), "failed", message);
+    await finish(rows.filter((r) => r.push_attempts < NOTIFICATION_LIMITS.maxPushAttempts).map((r) => r.id), "pending", message);
+    return json({ success: false, error: "fcm_auth_failed", message: "Push service authentication failed." }, 502);
+  }
+
+  const sent: string[] = [];
+  const noDevice: string[] = [];
+  const failed: string[] = [];
+  const retry: string[] = [];
+  const invalidTokens = new Set<string>();
+  let lastError: string | null = null;
+
+  for (const row of rows) {
+    const tokens = (tokensByEmployee.get(row.recipient_id) ?? []).filter((t) => !invalidTokens.has(t));
+    if (tokens.length === 0) {
+      noDevice.push(row.id);
+      continue;
+    }
+    let delivered = false;
+    let retryable = false;
+    for (const token of tokens) {
+      try {
+        const { result, detail } = await sendFcmMessage(account, accessToken, token, row, codeByEmployee.get(row.recipient_id) ?? "");
+        if (result === "sent") delivered = true;
+        if (result === "invalid_token") invalidTokens.add(token);
+        if (result === "retry") {
+          retryable = true;
+          lastError = detail ?? null;
+        }
+      } catch (err) {
+        retryable = true;
+        lastError = err instanceof Error ? err.message.slice(0, 300) : "send_failed";
+      }
+    }
+    if (delivered) sent.push(row.id);
+    else if (!retryable) noDevice.push(row.id);
+    else if (row.push_attempts >= NOTIFICATION_LIMITS.maxPushAttempts) failed.push(row.id);
+    else retry.push(row.id);
+  }
+
+  if (invalidTokens.size > 0) {
+    await adminClient.from("device_tokens").delete().in("token", Array.from(invalidTokens));
+  }
+  await Promise.all([
+    finish(sent, "sent", null),
+    finish(noDevice, "skipped", "no_device"),
+    finish(failed, "failed", lastError),
+    finish(retry, "pending", lastError)
+  ]);
+
+  return json({ success: true, sent: sent.length, skipped: noDevice.length, failed: failed.length, retrying: retry.length });
 }
 
 // =============================================================
