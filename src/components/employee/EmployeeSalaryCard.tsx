@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Eye, EyeOff, Loader2, Wallet, RefreshCw } from 'lucide-react'
+import { Eye, EyeOff, Wallet, RefreshCw } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { getMySalarySummary, formatRupees, type SalarySummary } from '../../lib/api'
 import { salaryStatusMessage } from '../../lib/salary'
 import { SalaryBreakdown } from '../SalaryBreakdown'
+import { SkeletonLines } from '../Skeleton'
 
 interface EmployeeSalaryCardProps {
   /** Changes whenever attendance may have changed, so a revealed card refreshes its figures */
@@ -65,7 +66,7 @@ export function EmployeeSalaryCard({ refreshKey }: EmployeeSalaryCardProps) {
     : 'This month'
 
   return (
-    <section className="rounded-3xl bg-white border border-slate-200/80 shadow-sm p-5 sm:p-6 flex flex-col gap-4">
+    <section className="rounded-3xl glass-panel border border-slate-200/70 shadow-sm p-5 sm:p-6 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -92,9 +93,7 @@ export function EmployeeSalaryCard({ refreshKey }: EmployeeSalaryCardProps) {
           <span className="text-2xl font-extrabold tracking-widest text-slate-300 select-none">₹ • • • • •</span>
         </div>
       ) : isLoading && !salary ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Loader2 className="w-4 h-4 animate-spin" /> Calculating…
-        </div>
+        <SkeletonLines lines={2} />
       ) : error ? (
         <div className="flex items-center justify-between gap-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
           <span>{error}</span>

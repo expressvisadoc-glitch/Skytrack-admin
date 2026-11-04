@@ -199,7 +199,7 @@ export function Settings({ onLogout }: SettingsProps) {
   }
 
   return (
-    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#faf9fd] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen">
       {/* Logout Confirmation Modal */}
       {showLogoutModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
@@ -263,7 +263,7 @@ export function Settings({ onLogout }: SettingsProps) {
         </div>
 
         {/* 1. Admin Profile Card */}
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 md:p-7">
+        <section className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 md:p-7">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-slate-100 gap-3">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-red-50 border border-red-100 text-red-600 flex items-center justify-center">
@@ -343,7 +343,7 @@ export function Settings({ onLogout }: SettingsProps) {
         </section>
 
         {/* 2. Security & Password Card */}
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 md:p-7">
+        <section className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 md:p-7">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-5 border-b border-slate-100 gap-3">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-red-50 border border-red-100 text-red-600 flex items-center justify-center">
@@ -494,7 +494,7 @@ export function Settings({ onLogout }: SettingsProps) {
         </section>
 
         {/* 3. Account Session Card */}
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 md:p-7 relative overflow-hidden">
+        <section className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 md:p-7 relative overflow-hidden">
           <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-red-600"></div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pl-2">
             <div className="flex flex-col max-w-xl">

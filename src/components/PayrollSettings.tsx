@@ -7,12 +7,14 @@ import {
   type PayrollPolicyHistoryEntry,
   type PayrollPolicyInput,
 } from '../lib/api'
+import { SkeletonPage } from './Skeleton'
 
 // Mirrors PAYROLL_POLICY_LIMITS in the skytrack-api Edge Function and the table CHECK constraints.
 const LIMITS = {
   lateGraceMinutes: { min: 0, max: 240 },
   lateMarksPerUnit: { min: 1, max: 31 },
   lateLopDaysPerUnit: { min: 0.01, max: 1 },
+  maxBreakMinutes: { min: 5, max: 480 },
   maxWeekOffDays: 6,
 }
 
@@ -24,6 +26,7 @@ interface FormState {
   lateMarksPerUnit: string
   lateLopDaysPerUnit: string
   officeTimezone: string
+  maxBreakMinutes: string
 }
 
 type FieldErrors = Partial<Record<keyof FormState, string>>
@@ -35,6 +38,7 @@ function formFromPolicy(p: PayrollPolicy | null): FormState {
     lateMarksPerUnit: p ? String(p.lateMarksPerUnit) : '',
     lateLopDaysPerUnit: p ? String(p.lateLopDaysPerUnit) : '',
     officeTimezone: p?.officeTimezone ?? '',
+    maxBreakMinutes: p?.maxBreakMinutes != null ? String(p.maxBreakMinutes) : '60',
   }
 }
 
@@ -54,6 +58,7 @@ function validate(form: FormState, timezones: Set<string>): { errors: FieldError
   }
   const grace = wholeNumber('lateGraceMinutes', form.lateGraceMinutes, LIMITS.lateGraceMinutes, ' minutes')
   const marks = wholeNumber('lateMarksPerUnit', form.lateMarksPerUnit, LIMITS.lateMarksPerUnit, '')
+  const maxBreak = wholeNumber('maxBreakMinutes', form.maxBreakMinutes, LIMITS.maxBreakMinutes, ' minutes')
 
   const lop = /^\s*\d*(\.\d{1,2})?\s*$/.test(form.lateLopDaysPerUnit) ? Number(form.lateLopDaysPerUnit) : NaN
   if (!Number.isFinite(lop) || lop < LIMITS.lateLopDaysPerUnit.min || lop > LIMITS.lateLopDaysPerUnit.max) {
@@ -74,6 +79,7 @@ function validate(form: FormState, timezones: Set<string>): { errors: FieldError
       lateMarksPerUnit: marks,
       lateLopDaysPerUnit: lop,
       officeTimezone: tz,
+      maxBreakMinutes: maxBreak,
     },
   }
 }
@@ -212,19 +218,14 @@ export function PayrollSettings() {
 
   if (isLoading) {
     return (
-      <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
-          <p className="text-sm font-semibold text-slate-500">Loading Payroll Settings...</p>
-        </div>
-      </main>
+      <SkeletonPage cards={2} />
     )
   }
 
   if (loadError || !policy) {
     return (
       <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen flex items-center justify-center">
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-md text-center flex flex-col items-center gap-3">
+        <div className="glass-panel rounded-2xl border border-slate-200/70 p-6 max-w-md text-center flex flex-col items-center gap-3">
           <span className="material-symbols-outlined text-[32px] text-red-500">error</span>
           <p className="text-sm text-slate-600">{loadError || 'Payroll settings are unavailable.'}</p>
           <button
@@ -250,7 +251,7 @@ export function PayrollSettings() {
     fieldErrors[key] ? <p className="text-[11.5px] text-red-600 font-medium">{fieldErrors[key]}</p> : null
 
   return (
-    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#faf9fd] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen">
       {/* Save Confirmation Modal */}
       {pendingSave && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
@@ -276,6 +277,8 @@ export function PayrollSettings() {
               <dd className="font-semibold text-slate-800 text-right">
                 {pendingSave.lateMarksPerUnit} marks = {pendingSave.lateLopDaysPerUnit} day
               </dd>
+              <dt className="text-slate-500">Allowed break</dt>
+              <dd className="font-semibold text-slate-800 text-right">{pendingSave.maxBreakMinutes} min</dd>
               <dt className="text-slate-500">Office timezone</dt>
               <dd className="font-semibold text-slate-800 text-right">{pendingSave.officeTimezone}</dd>
             </dl>
@@ -335,7 +338,7 @@ export function PayrollSettings() {
         )}
 
         {/* Current saved settings */}
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6">
+        <section className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6">
           <div className="flex items-center gap-3 pb-5 border-b border-slate-100">
             <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center">
               <span className="material-symbols-outlined text-[20px]">payments</span>
@@ -350,6 +353,7 @@ export function PayrollSettings() {
               ['Week-off days', weekOffLabel(policy.weekOffDays)],
               ['Late grace', `${policy.lateGraceMinutes} min after shift start`],
               ['Late deduction', `${policy.lateMarksPerUnit} marks = ${policy.lateLopDaysPerUnit} day LOP`],
+              ['Allowed break', policy.maxBreakMinutes != null ? `${policy.maxBreakMinutes} min` : '—'],
               ['Office timezone', policy.officeTimezone],
               ['Last changed', formatDateTime(policy.updatedAt)],
               ['Changed by', policy.updatedBy?.name ? `${policy.updatedBy.name}${policy.updatedBy.employeeId ? ` (${policy.updatedBy.employeeId})` : ''}` : '—'],
@@ -363,7 +367,7 @@ export function PayrollSettings() {
         </section>
 
         {/* Edit form */}
-        <form onSubmit={handleSubmit} noValidate className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col gap-5">
+        <form onSubmit={handleSubmit} noValidate className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col gap-5">
           <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
             <div className="w-9 h-9 rounded-xl bg-red-50 border border-red-100 text-red-600 flex items-center justify-center">
               <span className="material-symbols-outlined text-[20px]">tune</span>
@@ -423,6 +427,15 @@ export function PayrollSettings() {
           </p>
 
           <div className="flex flex-col gap-1.5 sm:max-w-sm">
+            <label htmlFor="pp-break" className="text-[11px] font-bold text-slate-500 uppercase">Allowed break (minutes)</label>
+            <input id="pp-break" type="number" min={LIMITS.maxBreakMinutes.min} max={LIMITS.maxBreakMinutes.max} step={1}
+              value={form.maxBreakMinutes} onChange={(e) => updateField('maxBreakMinutes', e.target.value)} className={inputClass('maxBreakMinutes')} />
+            {fieldError('maxBreakMinutes') ?? (
+              <p className="text-[11.5px] text-slate-400">Employees get a reminder when a break runs longer than this. It does not change pay.</p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1.5 sm:max-w-sm">
             <label htmlFor="pp-tz" className="text-[11px] font-bold text-slate-500 uppercase">Office timezone</label>
             {timezoneList.length > 0 ? (
               <select id="pp-tz" value={form.officeTimezone} onChange={(e) => updateField('officeTimezone', e.target.value)} className={inputClass('officeTimezone')}>
@@ -454,8 +467,8 @@ export function PayrollSettings() {
         </form>
 
         {/* Change history */}
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6">
-          <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+        <section className="">
+          <div className="flex items-center gap-3 pb-2">
             <div className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 text-slate-600 flex items-center justify-center">
               <span className="material-symbols-outlined text-[20px]">history</span>
             </div>
@@ -468,7 +481,7 @@ export function PayrollSettings() {
             <p className="pt-4 text-sm text-slate-400">No changes recorded yet. The current values are the starting defaults.</p>
           ) : (
             <div className="pt-2 overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="item-list w-full text-xs">
                 <thead>
                   <tr className="text-left text-slate-400 uppercase tracking-wide">
                     <th className="py-2 pr-3 font-bold">When</th>
@@ -476,17 +489,19 @@ export function PayrollSettings() {
                     <th className="py-2 pr-3 font-bold">Week-off</th>
                     <th className="py-2 pr-3 font-bold">Grace</th>
                     <th className="py-2 pr-3 font-bold">Late deduction</th>
+                    <th className="py-2 pr-3 font-bold">Break</th>
                     <th className="py-2 font-bold">Timezone</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.map((h) => (
-                    <tr key={h.id} className="border-t border-slate-100 text-slate-700">
+                    <tr key={h.id} className="text-slate-700">
                       <td className="py-2 pr-3 whitespace-nowrap">{formatDateTime(h.changedAt)}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">{h.changedBy?.name || '—'}</td>
                       <td className="py-2 pr-3">{weekOffLabel(h.weekOffDays)}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">{h.lateGraceMinutes} min</td>
                       <td className="py-2 pr-3 whitespace-nowrap">{h.lateMarksPerUnit} = {h.lateLopDaysPerUnit} day</td>
+                      <td className="py-2 pr-3 whitespace-nowrap">{h.maxBreakMinutes != null ? `${h.maxBreakMinutes} min` : '—'}</td>
                       <td className="py-2 whitespace-nowrap">{h.officeTimezone}</td>
                     </tr>
                   ))}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import {
   getEmployeeHistory,
@@ -19,12 +19,15 @@ import {
 } from '../lib/api'
 import { EmployeeSalarySection } from './EmployeeSalarySection'
 import { EmptyState } from './EmptyState'
+import { SkeletonTableRows } from './Skeleton'
 
 interface EmployeeDetailsProps {
   employee?: EmployeeDirectoryItem | null
   onBack: () => void
   onEmployeeUpdated?: (updated: EmployeeDirectoryItem) => void
   onEmployeeDeleted?: (deletedId: string) => void
+  // Scroll to this section on open (set by shortcut arrows, e.g. "Salary not set" on Payroll)
+  focusSection?: string | null
 }
 
 export function EmployeeDetails({
@@ -32,7 +35,14 @@ export function EmployeeDetails({
   onBack,
   onEmployeeUpdated,
   onEmployeeDeleted,
+  focusSection,
 }: EmployeeDetailsProps) {
+  const salaryRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (focusSection !== 'salary') return
+    const timer = setTimeout(() => salaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300)
+    return () => clearTimeout(timer)
+  }, [focusSection])
   const { token, logout, employee: currentAdmin } = useAuth()
   const [currentEmp, setCurrentEmp] = useState<EmployeeDirectoryItem | null>(initialEmployee || null)
   const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryItem[]>([])
@@ -460,7 +470,7 @@ export function EmployeeDetails({
   })
 
   return (
-    <main className="w-full px-4 sm:px-8 bg-background pt-24 pb-16 min-h-[calc(100vh-4rem)]">
+    <main className="w-full px-4 sm:px-8 pt-24 pb-16 min-h-[calc(100vh-4rem)]">
       <div className="flex flex-col w-full max-w-7xl mx-auto gap-6">
         {/* Top Back Navigation & Live Record Synced Status */}
         <div className="flex items-center justify-between">
@@ -496,7 +506,7 @@ export function EmployeeDetails({
         )}
 
         {/* Employee Profile Header Card */}
-        <div className="relative w-full rounded-2xl bg-white border border-slate-200/80 shadow-sm p-6 overflow-hidden">
+        <div className="relative w-full rounded-2xl glass-panel border border-slate-200/70 shadow-sm p-6 overflow-hidden">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-center gap-5">
               <div className="relative flex-shrink-0">
@@ -1080,7 +1090,7 @@ export function EmployeeDetails({
 
 
         {/* Today's Attendance Snapshot Card */}
-        <div className="w-full rounded-2xl bg-white border border-slate-200/80 shadow-sm p-6">
+        <div className="w-full rounded-2xl glass-panel border border-slate-200/70 shadow-sm p-6">
           <div className="flex items-center justify-between pb-4 mb-5 border-b border-slate-100">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
@@ -1158,12 +1168,14 @@ export function EmployeeDetails({
 
         {/* Salary Section (admins and super admins) */}
         {currentEmp && (currentEmp.id || currentEmp.employee_id) && (
-          <EmployeeSalarySection employeeId={currentEmp.id || currentEmp.employee_id} employeeName={currentEmp.name} />
+          <div ref={salaryRef} className="scroll-mt-24">
+            <EmployeeSalarySection employeeId={currentEmp.id || currentEmp.employee_id} employeeName={currentEmp.name} />
+          </div>
         )}
 
         {/* Leave Balance Section */}
         {leaveBalance && (
-          <div className="w-full rounded-2xl bg-white border border-slate-200/80 shadow-sm p-6">
+          <div className="w-full rounded-2xl glass-panel border border-slate-200/70 shadow-sm p-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 mb-5 border-b border-slate-100 gap-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
@@ -1191,15 +1203,15 @@ export function EmployeeDetails({
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                  <div className="flex flex-col p-2.5 glass-panel rounded-lg border border-slate-200/70 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Allocated</span>
                     <span className="text-lg font-extrabold text-slate-800">{leaveBalance.casual.allocated}</span>
                   </div>
-                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                  <div className="flex flex-col p-2.5 glass-panel rounded-lg border border-slate-200/70 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Adjusted</span>
                     <span className="text-lg font-extrabold text-slate-800">{leaveBalance.casual.adjusted}</span>
                   </div>
-                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                  <div className="flex flex-col p-2.5 glass-panel rounded-lg border border-slate-200/70 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Used</span>
                     <span className="text-lg font-extrabold text-slate-800">{leaveBalance.casual.used}</span>
                   </div>
@@ -1215,15 +1227,15 @@ export function EmployeeDetails({
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                  <div className="flex flex-col p-2.5 glass-panel rounded-lg border border-slate-200/70 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Allocated</span>
                     <span className="text-lg font-extrabold text-slate-800">{leaveBalance.sick.allocated}</span>
                   </div>
-                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                  <div className="flex flex-col p-2.5 glass-panel rounded-lg border border-slate-200/70 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Adjusted</span>
                     <span className="text-lg font-extrabold text-slate-800">{leaveBalance.sick.adjusted}</span>
                   </div>
-                  <div className="flex flex-col p-2.5 bg-white rounded-lg border border-slate-100 shadow-sm">
+                  <div className="flex flex-col p-2.5 glass-panel rounded-lg border border-slate-200/70 shadow-sm">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Used</span>
                     <span className="text-lg font-extrabold text-slate-800">{leaveBalance.sick.used}</span>
                   </div>
@@ -1234,8 +1246,8 @@ export function EmployeeDetails({
         )}
 
         {/* Attendance History Section */}
-        <div className="w-full rounded-2xl bg-white border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-6 pb-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="w-full">
+          <div className="pb-2 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
                 <span className="material-symbols-outlined text-lg">calendar_month</span>
@@ -1289,23 +1301,19 @@ export function EmployeeDetails({
             </div>
 
             {/* Attendance History Table */}
-            <div className="overflow-x-auto w-full border border-slate-200/80 rounded-xl">
-              <table className="w-full text-left border-collapse">
+            <div className="overflow-x-auto w-full">
+              <table className="item-list w-full text-left">
                 <thead className={!isLoading && attendanceHistory.length === 0 ? 'hidden' : undefined}>
-                  <tr className="bg-slate-50/90 border-b border-slate-200/80 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
+                  <tr className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">
                     <th className="py-3.5 px-6" scope="col">Date</th>
                     <th className="py-3.5 px-4" scope="col">Start Work</th>
                     <th className="py-3.5 px-4" scope="col">End Work</th>
                     <th className="py-3.5 px-6 text-right" scope="col">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="">
                   {isLoading ? (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-xs text-slate-400 font-medium">
-                        Loading attendance history...
-                      </td>
-                    </tr>
+                    <SkeletonTableRows columns={4} rows={4} avatar={false} />
                   ) : attendanceHistory.length === 0 ? (
                     <tr>
                       <td colSpan={4}>
@@ -1370,8 +1378,8 @@ export function EmployeeDetails({
         </div>
 
         {/* Leave History Section */}
-        <div className="w-full rounded-2xl bg-white border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-6 pb-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="w-full">
+          <div className="pb-2 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
                 <span className="material-symbols-outlined text-lg">beach_access</span>
@@ -1384,10 +1392,10 @@ export function EmployeeDetails({
           </div>
 
           <div className="p-6 pt-4">
-            <div className="overflow-x-auto w-full border border-slate-200/80 rounded-xl">
-              <table className="w-full text-left border-collapse">
+            <div className="overflow-x-auto w-full">
+              <table className="item-list w-full text-left">
                 <thead className={!isLoading && leaveHistory.length === 0 ? 'hidden' : undefined}>
-                  <tr className="bg-slate-50/90 border-b border-slate-200/80 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
+                  <tr className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">
                     <th className="py-3.5 px-6" scope="col">From</th>
                     <th className="py-3.5 px-4" scope="col">To</th>
                     <th className="py-3.5 px-4" scope="col">Type</th>
@@ -1395,13 +1403,9 @@ export function EmployeeDetails({
                     <th className="py-3.5 px-6 text-right" scope="col">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="">
                   {isLoading ? (
-                    <tr>
-                      <td colSpan={5} className="py-8 text-center text-xs text-slate-400 font-medium">
-                        Loading leave records...
-                      </td>
-                    </tr>
+                    <SkeletonTableRows columns={5} rows={3} avatar={false} />
                   ) : leaveHistory.length === 0 ? (
                     <tr>
                       <td colSpan={5}>
@@ -1448,7 +1452,7 @@ export function EmployeeDetails({
 
         {/* Danger Zone: Delete Employee (Hidden for Super Admin accounts to protect administrative access) */}
         {!isTargetSuperAdmin && (
-          <div className="w-full rounded-2xl bg-white border border-rose-200/80 shadow-sm p-6 overflow-hidden">
+          <div className="w-full rounded-2xl glass-panel border border-rose-200/80 shadow-sm p-6 overflow-hidden">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center shrink-0">

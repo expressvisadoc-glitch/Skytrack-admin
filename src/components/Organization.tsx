@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { getOrganizationData, updateWorkShift, type Department, type WorkShift } from '../lib/api'
 import { EmptyState } from './EmptyState'
+import { SkeletonPage } from './Skeleton'
 
 export function Organization() {
   const { token } = useAuth()
@@ -89,17 +90,12 @@ export function Organization() {
 
   if (isLoading) {
     return (
-      <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
-          <p className="text-sm font-semibold text-slate-500">Loading Organization Data...</p>
-        </div>
-      </main>
+      <SkeletonPage cards={2} />
     )
   }
 
   return (
-    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#faf9fd] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen">
       <div className="max-w-5xl mx-auto flex flex-col gap-6">
         {/* Page Breadcrumb & Title */}
         <div className="flex flex-col gap-2">
@@ -138,7 +134,7 @@ export function Organization() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Departments */}
-          <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col">
+          <section className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col">
             <div className="flex items-center gap-3 pb-5 border-b border-slate-100">
               <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center">
                 <span className="material-symbols-outlined text-[20px]">corporate_fare</span>
@@ -164,7 +160,7 @@ export function Organization() {
           </section>
 
           {/* Work Shifts */}
-          <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col">
+          <section className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col">
             <div className="flex items-center gap-3 pb-5 border-b border-slate-100">
               <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-100 text-amber-600 flex items-center justify-center">
                 <span className="material-symbols-outlined text-[20px]">schedule</span>
@@ -198,7 +194,7 @@ export function Organization() {
                       </div>
 
                       {isEditing ? (
-                        <div className="flex flex-col gap-3 p-3 bg-white rounded-lg border border-slate-200">
+                        <div className="flex flex-col gap-3 p-3 glass-panel rounded-lg border border-slate-200/70">
                           <div className="grid grid-cols-2 gap-3">
                             <div className="flex flex-col gap-1.5">
                               <label className="text-[11px] font-bold text-slate-500 uppercase">From Time</label>

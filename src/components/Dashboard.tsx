@@ -4,8 +4,11 @@ import {
   getAdminDashboardData,
   type DashboardData,
   type DashboardLeaveRequest,
+  formatMinutesShort,
 } from '../lib/api'
 import { EmptyState } from './EmptyState'
+import { ShortcutArrow } from './ShortcutArrow'
+import { openEmployeeScreen } from '../lib/navigation'
 
 export function Dashboard() {
   const { token, employee, logout } = useAuth()
@@ -87,9 +90,9 @@ export function Dashboard() {
           </div>
 
           {/* Content Split Skeleton */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-7">
-            <div className="xl:col-span-7 h-96 rounded-3xl bg-white/80 border border-slate-200/70 p-6"></div>
-            <div className="xl:col-span-5 space-y-7">
+          <div className="flex flex-col gap-7">
+            <div className="h-96 rounded-3xl bg-white/80 border border-slate-200/70 p-6"></div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-7">
               <div className="h-48 rounded-3xl bg-white/80 border border-slate-200/70 p-6"></div>
               <div className="h-48 rounded-3xl bg-white/80 border border-slate-200/70 p-6"></div>
             </div>
@@ -150,7 +153,7 @@ export function Dashboard() {
     <main className="relative w-full pt-28 px-4 sm:px-8 pb-14">
       <div className="flex flex-col w-full gap-7 max-w-[1600px] mx-auto">
         {/* Top Operational Hero Card / Greeting Banner */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-3xl bg-white/90 backdrop-blur-xl border border-white/80 shadow-[0_10px_30px_rgba(0,0,0,0.02)]">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-3xl glass-panel border border-slate-200/70 shadow-[0_10px_30px_rgba(0,0,0,0.02)]">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
@@ -325,10 +328,9 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Main Operational Grid: Today's Attendance (7 cols) & Pending Leaves + Activity (5 cols) */}
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-7 items-start">
-          {/* Primary Section: Today's Attendance Table (7 cols) */}
-          <section className="xl:col-span-7 glass-card rounded-3xl p-6 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col gap-6">
+        {/* Today's Attendance across the full width; Pending Leaves and Recent Activity side by side below */}
+        <div className="flex flex-col gap-8">
+          <section className="flex flex-col gap-6">
             {/* Section Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-5">
               <div>
@@ -342,7 +344,7 @@ export function Dashboard() {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Real-time start and end work records for {operationalDate}
+                  Shift, check-in and check-out, breaks and hours worked for {operationalDate}
                 </p>
               </div>
 
@@ -369,22 +371,23 @@ export function Dashboard() {
             </div>
 
             {/* Attendance Table Container */}
-            <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-white">
-              <table className="w-full text-left">
+            <div className="overflow-x-auto -mx-2 px-2">
+              <table className="item-list item-list-zoom w-full text-left">
                 <thead>
-                  <tr className="bg-slate-50/80 border-b border-slate-100 text-slate-400 text-[11px] font-bold uppercase tracking-wider">
-                    <th className="py-3.5 px-4">Employee</th>
-                    <th className="py-3.5 px-3">Employee ID</th>
-                    <th className="py-3.5 px-3">Date</th>
-                    <th className="py-3.5 px-3">Start Work</th>
-                    <th className="py-3.5 px-3">End Work</th>
-                    <th className="py-3.5 px-4 text-right">Status</th>
+                  <tr className="text-slate-400 text-[11px] font-bold uppercase tracking-wider">
+                    <th className="py-3 px-4">Employee</th>
+                    <th className="py-3 px-3">Shift</th>
+                    <th className="py-3 px-3">Check-in</th>
+                    <th className="py-3 px-3">Check-out</th>
+                    <th className="py-3 px-3">Break</th>
+                    <th className="py-3 px-3">Worked</th>
+                    <th className="py-3 px-4 text-right">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
+                <tbody className="text-sm text-slate-700">
                   {filteredAttendance.length === 0 ? (
                     <tr>
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <EmptyState icon="filter_alt_off" title="Nobody in this group today" description="No employees match the selected filter for today." />
                       </td>
                     </tr>
@@ -392,7 +395,7 @@ export function Dashboard() {
                     filteredAttendance.map((row) => (
                       <tr
                         key={row.id}
-                        className="hover:bg-slate-50/70 transition-colors"
+                        className="group/item hover:bg-slate-50/70 transition-colors"
                       >
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-3">
@@ -414,30 +417,57 @@ export function Dashboard() {
                                 {row.initials}
                               </div>
                             )}
-                            <span className="font-bold text-slate-900 text-xs">
-                              {row.name}
-                            </span>
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-bold text-slate-900 text-xs">
+                                {row.name}
+                              </span>
+                              <span className="text-[11px] text-slate-500 truncate max-w-[16rem]">
+                                <span className="font-semibold text-slate-400">{row.employeeId}</span>
+                                {[row.designation, row.department].filter(Boolean).length > 0 && ` · ${[row.designation, row.department].filter(Boolean).join(' · ')}`}
+                              </span>
+                            </div>
                           </div>
                         </td>
-                        <td className="py-3 px-3 text-xs font-semibold text-slate-500">
-                          {row.employeeId}
+                        <td className="py-3 px-3 text-xs whitespace-nowrap">
+                          {row.shiftName ? (
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-slate-700">{row.shiftName}</span>
+                              <span className="text-[11px] text-slate-400">{row.shiftHours}</span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">No shift</span>
+                          )}
                         </td>
-                        <td className="py-3 px-3 text-xs text-slate-500">{row.date}</td>
-                        <td
-                          className={`py-3 px-3 text-xs font-bold ${
-                            row.status === 'Late' || row.isLate
-                              ? 'text-red-500'
-                              : row.startTime === '—'
-                              ? 'text-slate-400'
-                              : 'text-slate-800'
-                          }`}
-                        >
-                          {row.startTime}
+                        <td className="py-3 px-3 text-xs whitespace-nowrap">
+                          <div className="flex flex-col">
+                            <span className={`font-bold ${row.status === 'Late' || row.isLate ? 'text-red-500' : row.startTime === '—' ? 'text-slate-400' : 'text-slate-800'}`}>
+                              {row.startTime}
+                            </span>
+                            {row.lateMinutes ? (
+                              <span className="text-[11px] font-semibold text-red-500">{formatMinutesShort(row.lateMinutes)} late</span>
+                            ) : null}
+                          </div>
                         </td>
-                        <td className="py-3 px-3 text-xs text-slate-400">
+                        <td className="py-3 px-3 text-xs whitespace-nowrap text-slate-500">
                           {row.endTime}
                         </td>
+                        <td className="py-3 px-3 text-xs whitespace-nowrap">
+                          {row.isOnBreak ? (
+                            <span className="font-semibold text-amber-700">On break · {formatMinutesShort(row.breakMinutes)}</span>
+                          ) : (
+                            <span className="text-slate-600">{row.breakMinutes ? formatMinutesShort(row.breakMinutes) : '—'}</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-xs whitespace-nowrap">
+                          <span className={row.workedMinutes !== null && row.workedMinutes !== undefined ? 'font-bold text-slate-800' : 'text-slate-400'}>
+                            {formatMinutesShort(row.workedMinutes)}
+                          </span>
+                          {row.workedMinutes !== null && row.workedMinutes !== undefined && row.endTime === '—' && !row.isOnBreak && (
+                            <span className="ml-1 text-[11px] text-slate-400">so far</span>
+                          )}
+                        </td>
                         <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2 whitespace-nowrap">
                           <span
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-bold text-xs ${
                               row.status === 'Present'
@@ -460,6 +490,11 @@ export function Dashboard() {
                             )}
                             {row.status === 'Leave' ? 'Leave (Approved)' : row.status}
                           </span>
+                          <ShortcutArrow
+                            label={`Open ${row.name}'s attendance`}
+                            onClick={() => openEmployeeScreen('attendance', row.employeeId)}
+                          />
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -469,10 +504,10 @@ export function Dashboard() {
             </div>
           </section>
 
-          {/* Secondary Column: Pending Leaves & Recent Events (5 cols) */}
-          <div className="xl:col-span-5 flex flex-col gap-7">
+          {/* Pending Leaves and Recent Activity, side by side below the attendance list */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-7 items-start">
             {/* Secondary Section 1: Pending Leave Requests */}
-            <section className="glass-card rounded-3xl p-6 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col gap-5">
+            <section className="flex flex-col gap-5">
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <div className="flex items-center gap-2.5">
                   <h2 className="text-base font-bold text-slate-900 tracking-tight">
@@ -489,14 +524,14 @@ export function Dashboard() {
 
               <div className="flex flex-col gap-3">
                 {(data?.pendingLeaveRequests || []).length === 0 ? (
-                  <div className="bg-white rounded-2xl border border-slate-100">
+                  <div className="glass-panel rounded-2xl border border-slate-200/70">
                     <EmptyState compact icon="task_alt" title="All caught up" description="No leave requests are waiting for review." />
                   </div>
                 ) : (
                   (data?.pendingLeaveRequests || []).map((req) => (
                     <div
                       key={req.id}
-                      className="p-4 rounded-2xl bg-white border border-slate-100 hover:border-red-200 hover:shadow-md transition-all flex flex-col gap-2 group"
+                      className="hover-magnify p-4 rounded-2xl glass-panel border border-slate-200/70 hover:border-red-200 hover:shadow-md transition-all flex flex-col gap-2 group"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -541,7 +576,7 @@ export function Dashboard() {
             </section>
 
             {/* Secondary Section 2: Recent Activity */}
-            <section className="glass-card rounded-3xl p-6 lg:p-7 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col gap-5">
+            <section className="flex flex-col gap-5">
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <h2 className="text-base font-bold text-slate-900 tracking-tight">
                   Recent Activity
@@ -550,14 +585,14 @@ export function Dashboard() {
               </div>
               <div className="flex flex-col gap-3.5">
                 {(data?.recentActivity || []).length === 0 ? (
-                  <div className="bg-white rounded-2xl border border-slate-100">
+                  <div className="glass-panel rounded-2xl border border-slate-200/70">
                     <EmptyState compact icon="schedule" title="No activity yet today" description="Check-ins, check-outs and breaks will appear here as they happen." />
                   </div>
                 ) : (
                   (data?.recentActivity || []).map((act) => (
                     <div
                       key={act.id}
-                      className="flex items-start gap-3 p-3 rounded-2xl bg-white border border-slate-100 hover:bg-slate-50/80 transition-colors"
+                      className="hover-magnify group/item flex items-start gap-3 p-3 rounded-2xl glass-panel border border-slate-200/70 hover:bg-slate-50/80 transition-colors"
                     >
                       <div
                         className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-0.5 ${act.iconBg} ${act.iconColor}`}
@@ -586,6 +621,11 @@ export function Dashboard() {
                           {act.time}
                         </span>
                       </div>
+                      <ShortcutArrow
+                        className="self-center"
+                        label={`Open ${act.user}'s attendance`}
+                        onClick={() => openEmployeeScreen('attendance', act.employeeId)}
+                      />
                     </div>
                   ))
                 )}
@@ -603,7 +643,7 @@ export function Dashboard() {
           }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-150"
         >
-          <div className="glass-card rounded-3xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-4 border border-white">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-4 border border-white">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">

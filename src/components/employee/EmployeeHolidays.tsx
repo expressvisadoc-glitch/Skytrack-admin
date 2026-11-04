@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { getPublicHolidaysList, type PublicHolidayItem, isSessionExpiredError } from '../../lib/api'
-import { 
-  Search, 
-  Sparkles, 
-  Clock, 
+import {
+  Search,
+  Sparkles,
+  Clock,
   AlertCircle,
   Flag,
   CalendarDays
 } from 'lucide-react'
+import { SkeletonTable } from '../Skeleton'
 
 export function EmployeeHolidays() {
   const { token, logout } = useAuth()
@@ -103,7 +104,7 @@ export function EmployeeHolidays() {
           Public Holidays Schedule
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 mt-1">
-          Review official statutory Gazetted and Restricted holidays observed by Skypass Visa Services.
+          Review official statutory Gazetted and Restricted holidays.
         </p>
       </div>
 
@@ -121,7 +122,7 @@ export function EmployeeHolidays() {
       {/* Bento Metric Pods */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         {/* Pod 1: Gazetted Holidays */}
-        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-2">
+        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/70 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Gazetted Holidays</span>
             <span className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
@@ -137,7 +138,7 @@ export function EmployeeHolidays() {
         </div>
 
         {/* Pod 2: Restricted / Optional Holidays */}
-        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-2">
+        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/70 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Restricted Holidays</span>
             <span className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
@@ -153,7 +154,7 @@ export function EmployeeHolidays() {
         </div>
 
         {/* Pod 3: Next Upcoming Holiday */}
-        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-2 relative overflow-hidden bg-gradient-to-br from-white via-white to-red-50/30">
+        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/70 space-y-2 relative overflow-hidden bg-gradient-to-br from-white via-white to-red-50/30">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-red-600">Next Upcoming</span>
             <span className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
@@ -179,7 +180,7 @@ export function EmployeeHolidays() {
       </div>
 
       {/* Search & Filters */}
-      <div className="glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/80 space-y-5">
+      <div className="space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           {/* Search bar */}
           <div className="relative flex-1 max-w-md">
@@ -202,11 +203,10 @@ export function EmployeeHolidays() {
                 <button
                   key={filter}
                   onClick={() => setTypeFilter(filter)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${
-                    isActive
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer ${isActive
                       ? 'bg-slate-900 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
+                    }`}
                 >
                   {label}
                 </button>
@@ -217,10 +217,7 @@ export function EmployeeHolidays() {
 
         {/* Holidays Table / List */}
         {isLoading ? (
-          <div className="py-16 text-center flex flex-col items-center justify-center space-y-3">
-            <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
-            <p className="text-xs font-bold text-slate-500">Loading Holiday Calendar...</p>
-          </div>
+          <SkeletonTable columns={4} avatar={false} />
         ) : filteredHolidays.length === 0 ? (
           <div className="py-16 text-center flex flex-col items-center justify-center space-y-3">
             <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center">
@@ -233,16 +230,16 @@ export function EmployeeHolidays() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="item-list w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-200/80 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                <tr className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                   <th className="py-3 px-3">Holiday Name</th>
                   <th className="py-3 px-3">Date &amp; Day</th>
                   <th className="py-3 px-3">Type</th>
                   <th className="py-3 px-3 text-right">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
+              <tbody className="font-medium">
                 {filteredHolidays.map((holiday) => {
                   const isPast = holiday.date < todayStr
                   const isToday = holiday.date === todayStr

@@ -1,16 +1,18 @@
 import { useState } from 'react'
-import { 
-  IdCard, 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  Calendar, 
-  LogIn, 
-  Loader2, 
-  CheckCircle2, 
-  AlertCircle 
+import {
+  IdCard,
+  Lock,
+  Eye,
+  EyeOff,
+  Calendar,
+  LogIn,
+  Loader2,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { GlassBackdrop } from './GlassBackdrop'
+import { ThemeToggle } from './ThemeToggle'
 
 interface LoginProps {
   onLoginSuccess?: (credential: string) => void
@@ -29,7 +31,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
         sessionStorage.removeItem('skytrack_session_expired_notice')
         return 'Your session has expired. Please sign in again to continue.'
       }
-    } catch (_) {}
+    } catch (_) { }
     return ''
   })
 
@@ -66,7 +68,8 @@ export function Login({ onLoginSuccess }: LoginProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#f4f6fb] bg-grid-pattern text-slate-800 antialiased relative selection:bg-red-500 selection:text-white flex flex-col justify-between">
+    <div className="app-bg isolate min-h-screen bg-white bg-grid-pattern text-slate-800 antialiased relative selection:bg-red-500 selection:text-white flex flex-col justify-between">
+      <GlassBackdrop />
       {/* Top Ambient Glows */}
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[720px] h-[360px] bg-gradient-to-b from-red-200/25 via-rose-100/15 to-transparent rounded-full blur-3xl"></div>
@@ -104,6 +107,8 @@ export function Login({ onLoginSuccess }: LoginProps) {
             <span>Operational</span>
           </div>
 
+          <ThemeToggle />
+
           {/* Connection / Security Status Pill */}
           <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-slate-200/80 shadow-xs text-xs font-semibold text-slate-600">
             <Lock className="w-3.5 h-3.5 text-slate-500" />
@@ -116,7 +121,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
       <main className="relative z-10 w-full flex-1 flex flex-col items-center justify-center px-4 py-8 sm:py-12">
         <div className="w-full max-w-[500px] mx-auto">
           {/* Main Card Architecture with glass-card aesthetics */}
-          <div className="glass-card rounded-3xl p-7 sm:p-10 shadow-[0_10px_35px_rgba(15,23,42,0.06)] border border-slate-200/80 relative transition-all duration-300">
+          <div className="glass-card rounded-3xl p-7 sm:p-10 shadow-[0_10px_35px_rgba(15,23,42,0.06)] border border-slate-200/70 relative transition-all duration-300">
             {/* Header Tag */}
             <div className="flex items-center justify-between gap-3 mb-6 pb-5 border-b border-slate-100">
               <div className="flex items-center gap-2">
@@ -236,13 +241,12 @@ export function Login({ onLoginSuccess }: LoginProps) {
               <div className="pt-2">
                 <button
                   disabled={statusState !== 'idle'}
-                  className={`w-full h-12 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${
-                    statusState === 'idle'
+                  className={`w-full h-12 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer ${statusState === 'idle'
                       ? 'bg-gradient-to-r from-red-500 via-rose-600 to-red-600 hover:from-red-600 hover:to-rose-700 shadow-red-500/30 active:scale-[0.99]'
                       : statusState === 'verifying'
-                      ? 'bg-slate-800 opacity-90 cursor-not-allowed'
-                      : 'bg-emerald-600 shadow-emerald-600/30'
-                  }`}
+                        ? 'bg-slate-800 opacity-90 cursor-not-allowed'
+                        : 'bg-emerald-600 shadow-emerald-600/30'
+                    }`}
                   type="submit"
                 >
                   {statusState === 'verifying' ? (
@@ -256,8 +260,8 @@ export function Login({ onLoginSuccess }: LoginProps) {
                     {statusState === 'idle'
                       ? 'Sign In to Admin Portal'
                       : statusState === 'verifying'
-                      ? 'Verifying Clearance & MFA...'
-                      : 'Clearance Approved. Redirecting...'}
+                        ? 'Verifying Clearance & MFA...'
+                        : 'Clearance Approved. Redirecting...'}
                   </span>
                 </button>
               </div>
@@ -277,7 +281,7 @@ export function Login({ onLoginSuccess }: LoginProps) {
       {/* Clean Enterprise Footer */}
       <footer className="relative z-10 w-full py-4 px-6 lg:px-12 border-t border-slate-200/80 bg-white/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-slate-500 text-xs font-medium">
-          <span>© 2026 SkyPass Visa Services. All rights reserved.</span>
+          <span>© 2026 SkyTrack. All rights reserved.</span>
         </div>
       </footer>
     </div>

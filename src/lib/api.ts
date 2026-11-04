@@ -148,6 +148,14 @@ export interface DashboardAttendanceRecord {
   isOnBreak?: boolean
   breakStartedAt?: string | null
   breakDuration?: string
+  // Detail for the full-width Dashboard list
+  designation?: string | null
+  department?: string | null
+  shiftName?: string | null
+  shiftHours?: string | null
+  lateMinutes?: number | null
+  breakMinutes?: number | null
+  workedMinutes?: number | null
 }
 
 export interface DashboardLeaveRequest {
@@ -402,6 +410,29 @@ export function formatTime(isoStr?: string | null): string {
   }
 }
 
+/** "10:00:00" -> minutes after midnight, or null */
+function clockMinutes(time?: string | null): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(time ?? '')
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null
+}
+
+/** "19:00:00" -> "7:00 PM" (shift times are office wall-clock times) */
+function formatClock(time?: string | null): string {
+  const minutes = clockMinutes(time)
+  if (minutes === null) return '—'
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
+
+/** 372 -> "6h 12m", 45 -> "45m" */
+export function formatMinutesShort(total?: number | null): string {
+  if (total === null || total === undefined) return '—'
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`
+}
+
 /**
  * Formats a Date object or date string (e.g. "2026-09-21") into "21 Sep 2026"
  */
@@ -564,6 +595,10 @@ export async function getAdminDashboardData(
       token
     ),
   ])
+  // Shift names and hours for the attendance list, from the server (work_shifts is not readable directly).
+  // Optional detail: the dashboard still works without it.
+  const shiftsData = await getOrganizationData(token).then((org) => org.work_shifts ?? []).catch((): WorkShift[] => [])
+  const shiftsById = new Map<string, WorkShift>(shiftsData.map((ws) => [ws.id, ws]))
 
   const employees = employeesData || []
   const attendanceList = attendanceData || []
@@ -675,7 +710,30 @@ export async function getAdminDashboardData(
           .toUpperCase()
       : 'SK'
 
+    const shift = emp.work_shift_id ? shiftsById.get(emp.work_shift_id) : null
+    const shiftStartMinutes = clockMinutes(shift?.start_time)
+    const checkIn = attRecord?.check_in ? new Date(attRecord.check_in) : null
+    const checkOut = attRecord?.check_out ? new Date(attRecord.check_out) : null
+    // Breaks: completed breaks plus the one in progress
+    const breakSeconds =
+      Number(attRecord?.total_break_seconds ?? (attRecord?.break_minutes ? attRecord.break_minutes * 60 : 0)) +
+      (isOnBreak && attRecord?.break_started_at ? Math.max(0, (now.getTime() - new Date(attRecord.break_started_at).getTime()) / 1000) : 0)
+    const workedMinutes = checkIn
+      ? Math.max(0, Math.round(((checkOut ?? now).getTime() - checkIn.getTime()) / 60000 - breakSeconds / 60))
+      : null
+    const lateMinutes =
+      checkIn && shiftStartMinutes !== null && (attRecord?.status || '').toLowerCase() === 'late'
+        ? Math.max(0, checkIn.getHours() * 60 + checkIn.getMinutes() - shiftStartMinutes)
+        : null
+
     return {
+      designation: emp.designation ?? null,
+      department: emp.department ?? null,
+      shiftName: shift?.shift_name ?? null,
+      shiftHours: shift ? `${formatClock(shift.start_time)} – ${formatClock(shift.end_time)}` : null,
+      lateMinutes,
+      breakMinutes: checkIn ? Math.round(breakSeconds / 60) : null,
+      workedMinutes,
       id: attRecord?.id || emp.id || String(Math.random()),
       name: emp.name || 'Unnamed Employee',
       employeeId: emp.employee_id || emp.employeeId || '—',
@@ -2924,6 +2982,8 @@ export interface PayrollPolicy {
   lateMarksPerUnit: number
   lateLopDaysPerUnit: number
   officeTimezone: string
+  /** Only used for the "break exceeded" reminder; null on history entries saved before it existed */
+  maxBreakMinutes: number | null
   updatedAt: string | null
   updatedBy: GeofenceAdminRef | null
 }
@@ -2940,6 +3000,7 @@ export interface PayrollPolicyInput {
   lateMarksPerUnit: number
   lateLopDaysPerUnit: number
   officeTimezone: string
+  maxBreakMinutes: number
 }
 
 export async function getPayrollPolicy(token: string): Promise<{
@@ -2960,6 +3021,37 @@ export async function savePayrollPolicy(token: string, policy: PayrollPolicyInpu
   return fetchSkyTrackApi(token, {
     action: 'admin_save_payroll_policy',
     ...policy,
+  })
+}
+
+/** In-app notification (docs/NOTIFICATIONS.md). Admin notifications are shown in the web bell panel. */
+export interface AppNotification {
+  id: string
+  type: string
+  title: string
+  body: string
+  data: { tab?: string; screen?: string; [key: string]: unknown }
+  createdAt: string
+  readAt: string | null
+}
+
+export async function getNotifications(
+  token: string,
+  options: { audience?: 'employee' | 'admin'; limit?: number; before?: string; excludeTypes?: string[] } = {},
+): Promise<{ success: boolean; notifications: AppNotification[]; unreadCount: number; hasMore: boolean }> {
+  return fetchSkyTrackApi(token, {
+    action: 'notifications_list',
+    ...options,
+  })
+}
+
+export async function markNotificationsRead(
+  token: string,
+  options: { audience?: 'employee' | 'admin'; ids?: string[]; all?: boolean },
+): Promise<{ success: boolean; updated: number }> {
+  return fetchSkyTrackApi(token, {
+    action: 'notifications_mark_read',
+    ...options,
   })
 }
 

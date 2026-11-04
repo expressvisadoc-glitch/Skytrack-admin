@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Dark theme follows the `dark` class on <html> (lib/theme.ts), not the OS setting */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-brand: #ef4444;
   --color-brand-50: #fef2f2;
@@ -37,11 +40,109 @@
   display: none;
 }
 
-.glass-card {
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(226, 232, 240, 0.85);
+/* Frosted glass for cards (not dialogs or form controls): a translucent sheen over the page's faint colour glows
+   (GlassBackdrop), a bright top highlight, a hairline edge and a soft lifted shadow. In the components layer so Tailwind utilities on the same element (hover
+   backgrounds, borders) still win. */
+@layer components {
+  .glass-panel,
+  .glass-card {
+    background-color: rgb(255 255 255 / 0.45);
+    background-image: linear-gradient(145deg, rgb(255 255 255 / 0.85) 0%, rgb(255 255 255 / 0.45) 50%, rgb(241 245 249 / 0.35) 100%);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    border: 1px solid rgb(226 232 240 / 0.75);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 1),
+      inset 0 0 0 1px rgb(255 255 255 / 0.5),
+      0 1px 2px rgb(15 23 42 / 0.04),
+      0 10px 30px -8px rgb(15 23 42 / 0.1);
+  }
+
+  /* Lists: no surrounding box; every row is its own glass card with space between rows */
+  .item-list {
+    border-collapse: separate;
+    border-spacing: 0 0.5rem;
+  }
+  .item-list > tbody > tr > td {
+    background-color: rgb(248 250 252 / 0.7);
+    border-top: 1px solid rgb(226 232 240 / 0.7);
+    border-bottom: 1px solid rgb(226 232 240 / 0.7);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9);
+    transition: background-color 150ms;
+  }
+  .item-list > tbody > tr > td:first-child {
+    border-left: 1px solid rgb(226 232 240 / 0.7);
+    border-top-left-radius: 1rem;
+    border-bottom-left-radius: 1rem;
+  }
+  .item-list > tbody > tr > td:last-child {
+    border-right: 1px solid rgb(226 232 240 / 0.7);
+    border-top-right-radius: 1rem;
+    border-bottom-right-radius: 1rem;
+  }
+  .item-list > tbody > tr:hover > td {
+    background-color: rgb(255 255 255 / 0.95);
+    border-color: rgb(203 213 225 / 0.8);
+  }
+  /* Hover magnification for list rows (.item-list-zoom on the table) and for cards (.hover-magnify).
+     Loading placeholders and empty-state rows stay still. */
+  .item-list-zoom > tbody > tr,
+  .hover-magnify {
+    transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 220ms ease, background-color 150ms;
+    transform-origin: center;
+  }
+  .item-list-zoom > tbody > tr:hover:not(.animate-pulse):not(:has(> td[colspan])) {
+    transform: scale(1.01);
+    position: relative;
+    z-index: 1;
+  }
+  .hover-magnify:hover {
+    transform: scale(1.02);
+    position: relative;
+    z-index: 1;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 1), 0 1px 2px rgb(15 23 42 / 0.04), 0 18px 40px -12px rgb(15 23 42 / 0.2);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .item-list-zoom > tbody > tr,
+    .hover-magnify {
+      transition: none;
+    }
+    .item-list-zoom > tbody > tr:hover:not(.animate-pulse):not(:has(> td[colspan])),
+    .hover-magnify:hover {
+      transform: none;
+    }
+  }
+
+  /* Dark theme: smoked glass with a faint light edge */
+  .dark .glass-panel,
+  .dark .glass-card {
+    background-color: rgb(17 26 43 / 0.5);
+    background-image: linear-gradient(145deg, rgb(255 255 255 / 0.08) 0%, rgb(255 255 255 / 0.02) 60%, rgb(255 255 255 / 0) 100%);
+    border-color: rgb(255 255 255 / 0.08);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -10px rgb(0 0 0 / 0.6);
+  }
+  .dark .item-list > tbody > tr > td {
+    background-color: rgb(17 26 43 / 0.6);
+    border-color: rgb(255 255 255 / 0.07);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+  .dark .item-list > tbody > tr:hover > td {
+    background-color: rgb(30 41 59 / 0.85);
+    border-color: rgb(255 255 255 / 0.14);
+  }
+  .dark .item-list > tbody > tr.row-highlight > td {
+    background-color: rgb(239 68 68 / 0.12);
+    border-color: rgb(239 68 68 / 0.3);
+  }
+  .dark .hover-magnify:hover {
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 18px 40px -12px rgb(0 0 0 / 0.7);
+  }
+
+  /* Selected or current row (e.g. the open leave request, today in an attendance month) */
+  .item-list > tbody > tr.row-highlight > td {
+    background-color: rgb(254 242 242 / 0.9);
+    border-color: rgb(254 202 202 / 0.9);
+  }
 }
 
 .bg-grid-pattern {
@@ -74,3 +175,203 @@ html:not(.icons-ready) .material-symbols-outlined {
   color: transparent !important;
 }
 
+
+/* ---------------------------------------------------------------------------------------------------------
+   Dark theme. The screens use Tailwind's light palette, so the theme remaps the colour variables: greys flip
+   (light surfaces dark, dark text light), pale tints become deep translucent tints, deep text shades become
+   pale, and white surfaces become the dark card colour. Elements that are dark on purpose and white text are
+   restored below.
+   --------------------------------------------------------------------------------------------------------- */
+.dark {
+  color-scheme: dark;
+  --color-white: #111a2b;
+  --color-slate-50: #131c2e;
+  --color-gray-50: #131c2e;
+  --color-slate-100: #18233a;
+  --color-gray-100: #18233a;
+  --color-slate-200: #243049;
+  --color-gray-200: #243049;
+  --color-slate-300: #334155;
+  --color-gray-300: #334155;
+  --color-slate-400: #64748b;
+  --color-gray-400: #64748b;
+  --color-slate-500: #94a3b8;
+  --color-gray-500: #94a3b8;
+  --color-slate-600: #a9b6c8;
+  --color-gray-600: #a9b6c8;
+  --color-slate-700: #cbd5e1;
+  --color-gray-700: #cbd5e1;
+  --color-slate-800: #e2e8f0;
+  --color-gray-800: #e2e8f0;
+  --color-slate-900: #f1f5f9;
+  --color-gray-900: #f1f5f9;
+  --color-slate-950: #f8fafc;
+  --color-gray-950: #f8fafc;
+  --color-red-50: rgb(239 68 68 / 0.1);
+  --color-red-100: rgb(239 68 68 / 0.16);
+  --color-red-200: rgb(239 68 68 / 0.3);
+  --color-red-700: #fca5a5;
+  --color-red-800: #fecaca;
+  --color-red-900: #fee2e2;
+  --color-rose-50: rgb(244 63 94 / 0.1);
+  --color-rose-100: rgb(244 63 94 / 0.16);
+  --color-rose-200: rgb(244 63 94 / 0.3);
+  --color-rose-700: #fda4af;
+  --color-rose-800: #fecdd3;
+  --color-rose-900: #ffe4e6;
+  --color-emerald-50: rgb(16 185 129 / 0.1);
+  --color-emerald-100: rgb(16 185 129 / 0.16);
+  --color-emerald-200: rgb(16 185 129 / 0.3);
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+  --color-emerald-900: #d1fae5;
+  --color-green-50: rgb(34 197 94 / 0.1);
+  --color-green-100: rgb(34 197 94 / 0.16);
+  --color-green-200: rgb(34 197 94 / 0.3);
+  --color-green-700: #86efac;
+  --color-green-800: #bbf7d0;
+  --color-green-900: #dcfce7;
+  --color-amber-50: rgb(245 158 11 / 0.1);
+  --color-amber-100: rgb(245 158 11 / 0.16);
+  --color-amber-200: rgb(245 158 11 / 0.3);
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-amber-900: #fef3c7;
+  --color-yellow-50: rgb(234 179 8 / 0.1);
+  --color-yellow-100: rgb(234 179 8 / 0.16);
+  --color-yellow-200: rgb(234 179 8 / 0.3);
+  --color-yellow-700: #fde047;
+  --color-yellow-800: #fef08a;
+  --color-yellow-900: #fef9c3;
+  --color-orange-50: rgb(249 115 22 / 0.1);
+  --color-orange-100: rgb(249 115 22 / 0.16);
+  --color-orange-200: rgb(249 115 22 / 0.3);
+  --color-orange-700: #fdba74;
+  --color-orange-800: #fed7aa;
+  --color-orange-900: #ffedd5;
+  --color-blue-50: rgb(59 130 246 / 0.1);
+  --color-blue-100: rgb(59 130 246 / 0.16);
+  --color-blue-200: rgb(59 130 246 / 0.3);
+  --color-blue-700: #93c5fd;
+  --color-blue-800: #bfdbfe;
+  --color-blue-900: #dbeafe;
+  --color-sky-50: rgb(14 165 233 / 0.1);
+  --color-sky-100: rgb(14 165 233 / 0.16);
+  --color-sky-200: rgb(14 165 233 / 0.3);
+  --color-sky-700: #7dd3fc;
+  --color-sky-800: #bae6fd;
+  --color-sky-900: #e0f2fe;
+  --color-indigo-50: rgb(99 102 241 / 0.1);
+  --color-indigo-100: rgb(99 102 241 / 0.16);
+  --color-indigo-200: rgb(99 102 241 / 0.3);
+  --color-indigo-700: #a5b4fc;
+  --color-indigo-800: #c7d2fe;
+  --color-indigo-900: #e0e7ff;
+  --color-violet-50: rgb(139 92 246 / 0.1);
+  --color-violet-100: rgb(139 92 246 / 0.16);
+  --color-violet-200: rgb(139 92 246 / 0.3);
+  --color-violet-700: #c4b5fd;
+  --color-violet-800: #ddd6fe;
+  --color-violet-900: #ede9fe;
+  --color-purple-50: rgb(168 85 247 / 0.1);
+  --color-purple-100: rgb(168 85 247 / 0.16);
+  --color-purple-200: rgb(168 85 247 / 0.3);
+  --color-purple-700: #d8b4fe;
+  --color-purple-800: #e9d5ff;
+  --color-purple-900: #f3e8ff;
+  --color-fuchsia-50: rgb(217 70 239 / 0.1);
+  --color-fuchsia-100: rgb(217 70 239 / 0.16);
+  --color-fuchsia-200: rgb(217 70 239 / 0.3);
+  --color-fuchsia-700: #f0abfc;
+  --color-fuchsia-800: #f5d0fe;
+  --color-fuchsia-900: #fae8ff;
+  --color-pink-50: rgb(236 72 153 / 0.1);
+  --color-pink-100: rgb(236 72 153 / 0.16);
+  --color-pink-200: rgb(236 72 153 / 0.3);
+  --color-pink-700: #f9a8d4;
+  --color-pink-800: #fbcfe8;
+  --color-pink-900: #fce7f3;
+  --color-teal-50: rgb(20 184 166 / 0.1);
+  --color-teal-100: rgb(20 184 166 / 0.16);
+  --color-teal-200: rgb(20 184 166 / 0.3);
+  --color-teal-700: #5eead4;
+  --color-teal-800: #99f6e4;
+  --color-teal-900: #ccfbf1;
+  --color-cyan-50: rgb(6 182 212 / 0.1);
+  --color-cyan-100: rgb(6 182 212 / 0.16);
+  --color-cyan-200: rgb(6 182 212 / 0.3);
+  --color-cyan-700: #67e8f9;
+  --color-cyan-800: #a5f3fc;
+  --color-cyan-900: #cffafe;
+  --color-lime-50: rgb(132 204 22 / 0.1);
+  --color-lime-100: rgb(132 204 22 / 0.16);
+  --color-lime-200: rgb(132 204 22 / 0.3);
+  --color-lime-700: #bef264;
+  --color-lime-800: #d9f99d;
+  --color-lime-900: #ecfccb;
+  --color-brand-50: rgb(239 68 68 / 0.1);
+  --color-brand-100: rgb(239 68 68 / 0.16);
+  --color-brand-200: rgb(239 68 68 / 0.3);
+  --color-brand-700: #fca5a5;
+  --color-brand-800: #fecaca;
+  --color-brand-900: #fee2e2;
+}
+
+/* Page background behind everything */
+.dark .app-bg {
+  background-color: #070c18;
+}
+.dark .text-\[\#181d27\] {
+  color: #e2e8f0;
+}
+
+/* White text and icons stay white */
+.dark .text-white,
+.dark .hover\:text-white:hover,
+.dark .selection\:text-white ::selection,
+.dark .selection\:text-white::selection {
+  color: #fff;
+}
+.dark .text-white\/80 {
+  color: rgb(255 255 255 / 0.8);
+}
+.dark .fill-white {
+  fill: #fff;
+}
+
+/* Surfaces that are dark on purpose (toasts, pills, modal overlays) stay dark */
+.dark .bg-slate-900 {
+  background-color: #1e293b;
+}
+.dark .bg-slate-800,
+.dark .hover\:bg-slate-800:hover {
+  background-color: #334155;
+}
+.dark .bg-slate-900\/20 { background-color: rgb(2 6 23 / 0.35); }
+.dark .bg-slate-900\/40 { background-color: rgb(2 6 23 / 0.6); }
+.dark .bg-slate-900\/50 { background-color: rgb(2 6 23 / 0.65); }
+.dark .bg-slate-900\/60 { background-color: rgb(2 6 23 / 0.7); }
+
+/* Inside surfaces that are dark on purpose, the original palette applies again (light greys stay light) */
+.dark :is(.bg-\[\#181d27\], .bg-slateDock, .bg-slateDock-900, .bg-slateDock-800, .bg-slate-900, .bg-slate-800) {
+  --color-white: #fff;
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617;
+}
+
+/* Map tiles: darkened to sit in the dark theme */
+.dark .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.9);
+}
+.dark .leaflet-container {
+  background: #0b1120;
+}

@@ -8,6 +8,9 @@ import {
   type LeaveSubmissionRecord,
 } from '../lib/api'
 import { EmptyState } from './EmptyState'
+import { ShortcutArrow } from './ShortcutArrow'
+import { openEmployeeScreen } from '../lib/navigation'
+import { SkeletonTable } from './Skeleton'
 
 export function LeaveManagement() {
   const { token } = useAuth()
@@ -149,10 +152,10 @@ export function LeaveManagement() {
   }
 
   return (
-    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#f4f6fb] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen">
       <div className="flex flex-col w-full gap-7 max-w-[1600px] mx-auto">
         {/* Top Operational Hero Card / Greeting Banner */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-3xl bg-white/90 backdrop-blur-xl border border-white/80 shadow-[0_10px_30px_rgba(0,0,0,0.02)]">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-6 rounded-3xl glass-panel border border-slate-200/70 shadow-[0_10px_30px_rgba(0,0,0,0.02)]">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
@@ -180,7 +183,7 @@ export function LeaveManagement() {
         </div>
 
         {/* Filter & Controls Toolbar Card */}
-        <div className="rounded-3xl p-5 bg-white/90 backdrop-blur-xl border border-white/80 shadow-[0_10px_30px_rgba(0,0,0,0.02)] flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+        <div className="rounded-3xl p-5 glass-panel border border-slate-200/70 shadow-[0_10px_30px_rgba(0,0,0,0.02)] flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
           {/* Search Bar & Refresh Trigger */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 flex-1">
             <div className="relative flex-1">
@@ -325,7 +328,7 @@ export function LeaveManagement() {
         {/* Primary Workspace: Split Layout Table + Drawer Preview */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-7 items-start">
           {/* Table Container Card (8 cols) */}
-          <div className="lg:col-span-8 rounded-3xl bg-white/90 backdrop-blur-xl border border-white/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] p-6 flex flex-col gap-5">
+          <div className="lg:col-span-8 flex flex-col gap-5">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
@@ -336,18 +339,13 @@ export function LeaveManagement() {
               <span className="text-xs font-semibold text-slate-400">Live Backend Stream</span>
             </div>
 
-            <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-white min-h-[300px]">
+            <div className="overflow-x-auto min-h-[300px] -mx-2 px-2">
               {isLoading ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-3">
-                  <span className="material-symbols-outlined text-3xl text-red-500 animate-spin">
-                    progress_activity
-                  </span>
-                  <p className="text-xs text-slate-400 font-medium">Loading leave submissions...</p>
-                </div>
+                <SkeletonTable columns={8} />
               ) : (
-                <table className="w-full text-left">
+                <table className="item-list item-list-zoom w-full text-left">
                   <thead>
-                    <tr className="bg-slate-50/80 border-b border-slate-100 text-slate-400 text-[11px] font-bold uppercase tracking-wider">
+                    <tr className="text-slate-400 text-[11px] font-bold uppercase tracking-wider">
                       <th className="py-3.5 px-4" scope="col">
                         Employee
                       </th>
@@ -374,7 +372,7 @@ export function LeaveManagement() {
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
+                  <tbody className="text-sm text-slate-700">
                     {filteredSubmissions.length === 0 ? (
                       <tr>
                         <td colSpan={8}>
@@ -390,8 +388,8 @@ export function LeaveManagement() {
                           <tr
                             key={row.id}
                             onClick={() => setSelectedId(row.id)}
-                            className={`hover:bg-slate-50/80 transition-colors cursor-pointer group ${
-                              isSelected ? 'bg-red-50/30' : ''
+                            className={`hover:bg-slate-50/80 transition-colors cursor-pointer group group/item ${
+                              isSelected ? 'row-highlight' : ''
                             }`}
                           >
                             <td className="py-3 px-4">
@@ -402,8 +400,14 @@ export function LeaveManagement() {
                                   alt={row.employeeName}
                                 />
                                 <div className="flex flex-col min-w-0">
-                                  <span className="font-bold text-slate-900 text-xs group-hover:text-red-600 transition-colors truncate">
-                                    {row.employeeName}
+                                  <span className="flex items-center gap-1.5 min-w-0">
+                                    <span className="font-bold text-slate-900 text-xs group-hover:text-red-600 transition-colors truncate">
+                                      {row.employeeName}
+                                    </span>
+                                    <ShortcutArrow
+                                      label={`Open ${row.employeeName}'s employee details`}
+                                      onClick={() => openEmployeeScreen('employees', row.employeeId)}
+                                    />
                                   </span>
                                   <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                                     {row.employeeId}
@@ -568,7 +572,7 @@ export function LeaveManagement() {
 
           {/* Selected Request Details Sticky Preview Panel (4 cols) */}
           {selectedItem && (
-            <div className="lg:col-span-4 rounded-3xl bg-white/90 backdrop-blur-xl border border-white/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] p-6 flex flex-col gap-5 sticky top-28">
+            <div className="lg:col-span-4 rounded-3xl glass-panel border border-slate-200/70 shadow-[0_4px_20px_rgba(0,0,0,0.02)] p-6 flex flex-col gap-5 sticky top-28">
               {/* Drawer Header */}
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <div className="flex flex-col gap-0.5">

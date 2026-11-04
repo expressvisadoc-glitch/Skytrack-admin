@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { NotificationPanel } from './NotificationPanel'
 import { useOnlineStatus } from '../lib/useOnlineStatus'
+import { ThemeToggle } from './ThemeToggle'
 
 export function Header({ onSelectTab, onToggleSidebar }: { onSelectTab?: (tab: string) => void, onToggleSidebar?: () => void }) {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
@@ -58,6 +59,8 @@ export function Header({ onSelectTab, onToggleSidebar }: { onSelectTab?: (tab: s
           <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
           <span>{isOnline ? 'Online' : 'Offline'}</span>
         </div>
+
+        <ThemeToggle />
 
         {/* Notification Bell */}
         <button

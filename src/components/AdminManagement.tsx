@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { getEmployeesDirectory, updateEmployeeRole, type EmployeeDirectoryItem } from '../lib/api'
 import { EmptyState } from './EmptyState'
+import { ShortcutArrow } from './ShortcutArrow'
+import { openEmployeeScreen } from '../lib/navigation'
+
+// Shared frosted glass (index.css) with a light edge
+const GLASS = 'glass-panel rounded-2xl border border-slate-200/70 ring-1 ring-slate-900/[0.03]'
 
 export function AdminManagement() {
   const { token, logout, employee } = useAuth()
@@ -72,7 +77,7 @@ export function AdminManagement() {
   // Only allow super admin to view this screen
   if (employee?.role !== 'super_admin') {
     return (
-      <main className="w-full pt-20 px-4 sm:px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
+      <main className="w-full pt-20 px-4 sm:px-8 pb-14 min-h-[calc(100vh-4rem)]">
         <div className="flex flex-col items-center justify-center pt-20">
            <h1 className="text-2xl font-bold text-red-600">Access Denied</h1>
            <p className="text-slate-500 mt-2">Only Super Admins can access this section.</p>
@@ -82,7 +87,7 @@ export function AdminManagement() {
   }
 
   return (
-    <main className="w-full pt-20 px-4 sm:px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
+    <main className="w-full pt-20 px-4 sm:px-8 pb-14 min-h-[calc(100vh-4rem)]">
       <div className="flex flex-col w-full max-w-7xl mx-auto gap-6">
         <div className="flex flex-col pt-4 gap-1.5">
           <div className="flex items-center gap-2">
@@ -111,81 +116,88 @@ export function AdminManagement() {
           </div>
         )}
 
-        <div className="w-full bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/90 border-b border-slate-200/80 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
-                  <th className="py-3.5 px-6" scope="col">Employee</th>
-                  <th className="py-3.5 px-4" scope="col">Employee ID</th>
-                  <th className="py-3.5 px-4" scope="col">Current Role</th>
-                  <th className="py-3.5 px-6 text-right" scope="col">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={4} className="py-12 text-center text-xs text-slate-400 font-medium">
-                      Loading registry...
-                    </td>
-                  </tr>
-                ) : employees.length === 0 ? (
-                  <tr>
-                    <td colSpan={4}><EmptyState icon="group_off" title="No employees found" /></td>
-                  </tr>
-                ) : (
-                  employees.map((emp) => (
-                    <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-6">
-                        <div className="flex items-center gap-3.5">
-                          <div className="flex flex-col min-w-0">
-                            <span className="text-sm font-semibold text-slate-900">{emp.name}</span>
-                          </div>
+        {/* Each employee is its own frosted-glass card */}
+        <div className="relative isolate">
+
+          {isLoading ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading employees">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className={`${GLASS} h-40 animate-pulse`} />
+              ))}
+            </div>
+          ) : employees.length === 0 ? (
+            <div className={GLASS}>
+              <EmptyState icon="group_off" title="No employees found" />
+            </div>
+          ) : (
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {employees.map((emp) => {
+                const code = emp.employee_id || emp.code
+                const isUpdating = updatingId === code
+                return (
+                  <li key={emp.id} className={`${GLASS} group/item min-w-0 p-5 flex flex-col gap-4 hover-magnify`}>
+                    <div className="flex items-start gap-3.5">
+                      {emp.avatar ? (
+                        <img src={emp.avatar} alt="" className="w-11 h-11 rounded-2xl object-cover ring-2 ring-white/80 shadow-sm shrink-0" />
+                      ) : (
+                        <div className={`w-11 h-11 rounded-2xl border flex items-center justify-center font-bold text-sm shrink-0 ${emp.initialsBg || 'bg-white/70'} ${emp.initialsColor || 'text-slate-700 border-white/80'}`}>
+                          {emp.initials || emp.name.slice(0, 2).toUpperCase()}
                         </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="text-xs font-semibold text-slate-700 font-mono bg-slate-100 px-2 py-1 rounded-md border border-slate-200/60">
-                          {emp.employee_id || emp.code}
+                      )}
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-sm font-bold text-slate-900 break-words min-w-0">{emp.name}</span>
+                          <ShortcutArrow
+                            label={`Open ${emp.name}'s employee details`}
+                            onClick={() => openEmployeeScreen('employees', code || emp.id)}
+                          />
                         </span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold shadow-2xs ${
-                          emp.role === 'super_admin' ? 'bg-purple-50 text-purple-700 border border-purple-200' :
-                          emp.role === 'admin' ? 'bg-red-50 text-red-700 border border-red-200' :
-                          'bg-slate-50 text-slate-700 border border-slate-200'
-                        }`}>
-                          {emp.role === 'super_admin' ? 'Super Admin' : emp.role === 'admin' ? 'Admin' : 'Employee'}
+                        <span className="text-xs text-slate-500 truncate">
+                          {[emp.designation, emp.department].filter(Boolean).join(' · ') || emp.email}
                         </span>
-                      </td>
-                      <td className="py-3.5 px-6 text-right">
-                        {emp.role === 'super_admin' ? (
-                          <button disabled className="inline-flex items-center px-3 py-1.5 rounded-lg bg-slate-100 text-slate-400 font-semibold text-xs border border-slate-200 opacity-70 cursor-not-allowed">
-                            Super Admin
-                          </button>
-                        ) : emp.role === 'admin' ? (
-                          <button
-                            onClick={() => handleUpdateRole(emp, 'employee')}
-                            disabled={updatingId === (emp.employee_id || emp.code)}
-                            className="inline-flex items-center px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 font-semibold text-xs border border-amber-200 transition-all cursor-pointer disabled:opacity-50"
-                          >
-                            {updatingId === (emp.employee_id || emp.code) ? 'Updating...' : 'Remove Admin'}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleUpdateRole(emp, 'admin')}
-                            disabled={updatingId === (emp.employee_id || emp.code)}
-                            className="inline-flex items-center px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-semibold text-xs border border-emerald-200 transition-all cursor-pointer disabled:opacity-50"
-                          >
-                            {updatingId === (emp.employee_id || emp.code) ? 'Updating...' : 'Make Admin'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                      </div>
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 border ${
+                        emp.role === 'super_admin' ? 'bg-purple-50/80 text-purple-700 border-purple-200/80' :
+                        emp.role === 'admin' ? 'bg-red-50/80 text-red-700 border-red-200/80' :
+                        'bg-white/70 text-slate-600 border-slate-200/80'
+                      }`}>
+                        {emp.role === 'super_admin' ? 'Super Admin' : emp.role === 'admin' ? 'Admin' : 'Employee'}
+                      </span>
+                    </div>
+
+                    <div className="mt-auto flex items-center justify-between gap-3 pt-3 border-t border-slate-200/60">
+                      <span className="text-xs font-semibold text-slate-600 font-mono bg-slate-50/80 px-2 py-1 rounded-md border border-slate-200/70">
+                        {code}
+                      </span>
+                      {emp.role === 'super_admin' ? (
+                        <span className="text-xs font-semibold text-slate-400">Full access</span>
+                      ) : emp.role === 'admin' ? (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateRole(emp, 'employee')}
+                          disabled={isUpdating}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-50/80 text-amber-700 hover:bg-amber-100 font-semibold text-xs border border-amber-200/80 transition-all cursor-pointer disabled:opacity-50"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">remove_moderator</span>
+                          {isUpdating ? 'Updating...' : 'Remove Admin'}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateRole(emp, 'admin')}
+                          disabled={isUpdating}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50/80 text-emerald-700 hover:bg-emerald-100 font-semibold text-xs border border-emerald-200/80 transition-all cursor-pointer disabled:opacity-50"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">add_moderator</span>
+                          {isUpdating ? 'Updating...' : 'Make Admin'}
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
         </div>
       </div>
 

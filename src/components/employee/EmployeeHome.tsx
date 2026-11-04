@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   BarChart3
 } from 'lucide-react'
+import { SkeletonPage } from '../Skeleton'
 
 export function EmployeeHome() {
   const { token, employee, logout } = useAuth()
@@ -312,12 +313,7 @@ export function EmployeeHome() {
 
   if (isLoading) {
     return (
-      <div className="pt-28 px-4 sm:px-8 pb-12 max-w-7xl mx-auto flex flex-col items-center justify-center min-h-[60vh]">
-        <div className="flex flex-col items-center gap-4">
-          <span className="w-10 h-10 rounded-full bg-red-500 animate-ping"></span>
-          <p className="text-sm font-semibold text-slate-500">Syncing Attendance Status...</p>
-        </div>
-      </div>
+      <SkeletonPage cards={3} className="pt-28 px-4 sm:px-8 pb-12" />
     )
   }
 
@@ -356,7 +352,7 @@ export function EmployeeHome() {
       )}
 
       {/* Greeting Banner */}
-      <div className="glass-card rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-xs border border-slate-200/80">
+      <div className="glass-card rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-xs border border-slate-200/70">
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-red-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
           <div className="space-y-1.5">
@@ -393,7 +389,7 @@ export function EmployeeHome() {
       {/* Primary Attendance & Break Command Center */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Work Status Card (2 Columns) */}
-        <div className="lg:col-span-2 glass-card rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200/80 flex flex-col justify-between">
+        <div className="lg:col-span-2 glass-card rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200/70 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-5 border-b border-slate-100">
               <div className="flex items-center gap-2">
@@ -801,7 +797,7 @@ export function EmployeeHome() {
           <EmployeeSalaryCard refreshKey={salaryRefreshKey} />
 
           {/* Card 1: Today's Punch Summary */}
-          <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-4">
+          <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/70 space-y-4">
             <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-2">
               <Calendar className="w-4 h-4 text-red-500" />
               <span>Today's Timecard</span>
@@ -839,7 +835,7 @@ export function EmployeeHome() {
           </div>
 
           {/* Card 2: Helpful Guidelines */}
-          <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-3 flex-1 flex flex-col justify-between">
+          <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/70 space-y-3 flex-1 flex flex-col justify-between">
             <div className="space-y-2">
               <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-amber-500" />

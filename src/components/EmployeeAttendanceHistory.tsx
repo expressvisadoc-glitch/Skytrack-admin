@@ -10,6 +10,7 @@ import {
   type MonthlyAttendanceDay,
 } from '../lib/api'
 import { EmptyState } from './EmptyState'
+import { SkeletonTableRows, SkeletonValue } from './Skeleton'
 
 interface EmployeeOption {
   id: string
@@ -219,7 +220,7 @@ export function EmployeeAttendanceHistory({
   }
 
   return (
-    <main className="relative min-h-screen bg-[#faf9fd] w-full px-4 sm:px-8 py-7 pt-24 print:pt-4 print:px-2 print:bg-white">
+    <main className="relative min-h-screen w-full px-4 sm:px-8 py-7 pt-24 print:pt-4 print:px-2 print:bg-white">
       {/* Enter / correct attendance for one day */}
       {editingDay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 print:hidden">
@@ -384,7 +385,7 @@ export function EmployeeAttendanceHistory({
         )}
 
         {/* Employee Profile Overview Card */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="glass-panel border border-slate-200/70 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             {employee.avatar ? (
               <img
@@ -467,7 +468,7 @@ export function EmployeeAttendanceHistory({
         {/* 6 Metric KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3.5">
           {/* 1. Total Worked Hours */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
+          <div className="glass-panel border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 WORKED HOURS
@@ -478,7 +479,7 @@ export function EmployeeAttendanceHistory({
             </div>
             <div>
               <span className="text-xl font-bold text-slate-900 tracking-tight">
-                {isLoading ? '...' : summary?.totalHours || '0h 00m'}
+                {isLoading ? <SkeletonValue /> : summary?.totalHours || '0h 00m'}
               </span>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 Avg: {summary?.averageHours || '0h 00m'} / day
@@ -487,7 +488,7 @@ export function EmployeeAttendanceHistory({
           </div>
 
           {/* 2. Target Required Hours */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
+          <div className="glass-panel border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 TARGET HOURS
@@ -498,7 +499,7 @@ export function EmployeeAttendanceHistory({
             </div>
             <div>
               <span className="text-xl font-bold text-slate-900 tracking-tight">
-                {isLoading ? '...' : summary?.targetHours || '0h 00m'}
+                {isLoading ? <SkeletonValue /> : summary?.targetHours || '0h 00m'}
               </span>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 {summary?.requiredWorkingDays || 0} Working Days
@@ -507,7 +508,7 @@ export function EmployeeAttendanceHistory({
           </div>
 
           {/* 3. Present Days */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
+          <div className="glass-panel border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 PRESENT DAYS
@@ -519,7 +520,7 @@ export function EmployeeAttendanceHistory({
             <div>
               <div className="flex items-baseline gap-1.5">
                 <span className="text-xl font-bold text-emerald-600 tracking-tight">
-                  {isLoading ? '...' : summary?.presentDays || 0}
+                  {isLoading ? <SkeletonValue /> : summary?.presentDays || 0}
                 </span>
                 <span className="text-xs font-semibold text-slate-400">
                   / {summary?.requiredWorkingDays || 0}
@@ -532,7 +533,7 @@ export function EmployeeAttendanceHistory({
           </div>
 
           {/* 4. Absent Days */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
+          <div className="glass-panel border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 ABSENT DAYS
@@ -543,7 +544,7 @@ export function EmployeeAttendanceHistory({
             </div>
             <div>
               <span className="text-xl font-bold text-red-600 tracking-tight">
-                {isLoading ? '...' : summary?.absentDays || 0}
+                {isLoading ? <SkeletonValue /> : summary?.absentDays || 0}
               </span>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 Unexcused absences
@@ -552,7 +553,7 @@ export function EmployeeAttendanceHistory({
           </div>
 
           {/* 5. Approved Leave Days */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
+          <div className="glass-panel border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 LEAVE DAYS
@@ -563,7 +564,7 @@ export function EmployeeAttendanceHistory({
             </div>
             <div>
               <span className="text-xl font-bold text-purple-600 tracking-tight">
-                {isLoading ? '...' : summary?.leaveDays || 0}
+                {isLoading ? <SkeletonValue /> : summary?.leaveDays || 0}
               </span>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 Paid & verified leaves
@@ -572,7 +573,7 @@ export function EmployeeAttendanceHistory({
           </div>
 
           {/* 6. Overtime / Difference */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
+          <div className="glass-panel border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col justify-between gap-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 OVERTIME / BALANCE
@@ -583,7 +584,7 @@ export function EmployeeAttendanceHistory({
             </div>
             <div>
               <span className="text-xl font-bold text-slate-900 tracking-tight">
-                {isLoading ? '...' : summary?.differenceFormatted || '0h 00m'}
+                {isLoading ? <SkeletonValue /> : summary?.differenceFormatted || '0h 00m'}
               </span>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 Net vs target hours
@@ -593,7 +594,7 @@ export function EmployeeAttendanceHistory({
         </div>
 
         {/* Filter Controls & Search */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 print:hidden">
+        <div className="glass-panel border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 print:hidden">
           {/* Search Input */}
           <div className="relative flex-1 max-w-md">
             <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">
@@ -628,9 +629,9 @@ export function EmployeeAttendanceHistory({
         </div>
 
         {/* Daily Attendance Breakdown Table */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+        <div className="flex flex-col">
           {/* Table Header */}
-          <div className="px-6 py-4 bg-slate-50/70 border-b border-slate-200/80 flex items-center justify-between">
+          <div className="px-1 pb-1 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <span className="font-bold text-slate-900 text-sm">
                 Daily Attendance Breakdown
@@ -645,10 +646,10 @@ export function EmployeeAttendanceHistory({
           </div>
 
           {/* Table View */}
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left border-collapse">
+          <div className="overflow-x-auto w-full -mx-2 px-2">
+            <table className="item-list item-list-zoom w-full text-left">
               <thead>
-                <tr className="border-b border-slate-200/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-white">
+                <tr className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   <th className="py-3 px-6">DATE & DAY</th>
                   <th className="py-3 px-4">STATUS</th>
                   <th className="py-3 px-4">CHECK IN</th>
@@ -659,18 +660,9 @@ export function EmployeeAttendanceHistory({
                   <th className="py-3 px-4 text-right print:hidden">ACTION</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
+              <tbody className="text-xs">
                 {isLoading ? (
-                  <tr>
-                    <td colSpan={8} className="py-16 text-center text-slate-400">
-                      <div className="flex flex-col items-center justify-center gap-3">
-                        <span className="w-6 h-6 rounded-full bg-red-500 animate-ping"></span>
-                        <p className="text-slate-500 font-semibold text-xs">
-                          Fetching monthly attendance history...
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
+                  <SkeletonTableRows columns={8} avatar={false} />
                 ) : filteredDays.length === 0 ? (
                   <tr>
                     <td colSpan={8}>
@@ -684,7 +676,7 @@ export function EmployeeAttendanceHistory({
                       <tr
                         key={row.date}
                         className={`hover:bg-slate-50/70 transition-colors ${
-                          isToday ? 'bg-red-50/20' : ''
+                          isToday ? 'row-highlight' : ''
                         }`}
                       >
                         {/* Date & Day */}

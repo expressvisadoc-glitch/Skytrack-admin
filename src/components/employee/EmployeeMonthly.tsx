@@ -17,6 +17,7 @@ import {
   Hourglass
 } from 'lucide-react'
 import { EmployeePayslips } from './EmployeePayslips'
+import { SkeletonTable } from '../Skeleton'
 
 export function EmployeeMonthly() {
   const { token, employee, logout } = useAuth()
@@ -189,7 +190,7 @@ export function EmployeeMonthly() {
       {/* Monthly Statistics Bento Pods */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {/* Pod 1: Days Present */}
-        <div className="glass-card rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/80 space-y-2">
+        <div className="glass-card rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/70 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Days Present</span>
             <span className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -205,7 +206,7 @@ export function EmployeeMonthly() {
         </div>
 
         {/* Pod 2: Attendance Rate */}
-        <div className="glass-card rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/80 space-y-2">
+        <div className="glass-card rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/70 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Attendance Rate</span>
             <span className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -221,7 +222,7 @@ export function EmployeeMonthly() {
         </div>
 
         {/* Pod 3: Total Hours Worked */}
-        <div className="glass-card rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/80 space-y-2">
+        <div className="glass-card rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/70 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Worked</span>
             <span className="w-7 h-7 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
@@ -237,7 +238,7 @@ export function EmployeeMonthly() {
         </div>
 
         {/* Pod 4: Average Daily Hours */}
-        <div className="glass-card rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/80 space-y-2">
+        <div className="glass-card rounded-3xl p-5 sm:p-6 shadow-xs border border-slate-200/70 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Daily Average</span>
             <span className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
@@ -254,7 +255,7 @@ export function EmployeeMonthly() {
       </div>
 
       {/* Daily Records Ledger Table */}
-      <div className="glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/80 space-y-5">
+      <div className="space-y-5">
         <div className="flex items-center justify-between pb-4 border-b border-slate-100">
           <div>
             <h2 className="text-base font-bold text-slate-900">Daily Punches &amp; Working Hours</h2>
@@ -266,10 +267,7 @@ export function EmployeeMonthly() {
         </div>
 
         {isLoading ? (
-          <div className="py-16 text-center flex flex-col items-center justify-center space-y-3">
-            <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
-            <p className="text-xs font-bold text-slate-500">Loading Timesheet Records...</p>
-          </div>
+          <SkeletonTable columns={6} avatar={false} />
         ) : records.length === 0 ? (
           <div className="py-16 text-center flex flex-col items-center justify-center space-y-3">
             <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center">
@@ -282,9 +280,9 @@ export function EmployeeMonthly() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="item-list w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-200/80 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                <tr className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                   <th className="py-3 px-3">Date</th>
                   <th className="py-3 px-3">Status</th>
                   <th className="py-3 px-3">Punch In</th>
@@ -293,7 +291,7 @@ export function EmployeeMonthly() {
                   <th className="py-3 px-3 text-right">Breaks</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
+              <tbody className="font-medium">
                 {records.map((rec, idx) => {
                   const st = String(rec.status || 'present').toLowerCase()
                   const isPresent = st === 'present'

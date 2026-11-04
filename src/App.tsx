@@ -26,6 +26,7 @@ import { EmployeeProfile } from './components/employee/EmployeeProfile'
 
 import { useAuth } from './contexts/AuthContext'
 import './index.css'
+import { GlassBackdrop } from './components/GlassBackdrop'
 
 const VALID_ADMIN_TABS = [
   'dashboard',
@@ -83,7 +84,7 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#f4f6fb] flex items-center justify-center">
+      <div className="app-bg min-h-screen bg-white flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
           <p className="text-sm font-semibold text-slate-500">Initializing Workspace...</p>
@@ -111,7 +112,8 @@ function App() {
   if (isAdmin) {
     return (
       <ProtectedRoute adminOnly>
-        <div className="bg-[#f6f8fc] text-[#181d27] antialiased min-h-screen selection:bg-brand-100 selection:text-brand-600 overflow-hidden lg:overflow-auto">
+        <div className="app-bg isolate bg-white text-[#181d27] antialiased min-h-screen selection:bg-brand-100 selection:text-brand-600 overflow-hidden lg:overflow-auto">
+          <GlassBackdrop />
           <Sidebar 
             activeTab={activeTab} 
             onSelectTab={handleSelectTab} 
@@ -175,7 +177,8 @@ function App() {
   // =========================================================
   return (
     <ProtectedRoute>
-      <div className="bg-[#f6f8fc] text-[#181d27] antialiased min-h-screen selection:bg-brand-100 selection:text-brand-600 overflow-hidden lg:overflow-auto">
+      <div className="app-bg isolate bg-white text-[#181d27] antialiased min-h-screen selection:bg-brand-100 selection:text-brand-600 overflow-hidden lg:overflow-auto">
+          <GlassBackdrop />
         <EmployeeSidebar 
           activeTab={activeTab} 
           onSelectTab={handleSelectTab} 

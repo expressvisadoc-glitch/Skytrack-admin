@@ -7,7 +7,9 @@ import {
   type GeofenceHistoryEntry,
   type GeofenceSettingsInput,
 } from '../lib/api'
-import { getBrowserLocation } from '../lib/geolocation'
+import { distanceMeters, getBrowserLocation } from '../lib/geolocation'
+import { GeofenceMap, type UserFix } from './GeofenceMap'
+import { SkeletonPage } from './Skeleton'
 
 // Mirrors GEOFENCE_LIMITS in the skytrack-api Edge Function and the table CHECK constraints.
 const LIMITS = {
@@ -112,12 +114,30 @@ function formatCoord(n: number | null | undefined): string {
   return n == null ? '—' : n.toFixed(6)
 }
 
-function osmEmbedUrl(lat: number, lng: number, radiusMeters: number): string {
-  const halfSpan = Math.max(radiusMeters * 2.5, 150)
-  const dLat = halfSpan / 111195
-  const dLng = halfSpan / (111195 * Math.max(Math.cos((lat * Math.PI) / 180), 0.01))
-  const bbox = [lng - dLng, lat - dLat, lng + dLng, lat + dLat].map((v) => v.toFixed(6)).join(',')
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat.toFixed(6)},${lng.toFixed(6)}`
+function formatDistance(meters: number): string {
+  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(meters < 10000 ? 1 : 0)} km`
+}
+
+interface GeofenceChange {
+  label: string
+  from: string | null
+  to: string
+}
+
+/** Settings that differ from the previous (older) history entry; all of them for the first entry. */
+function describeChanges(entry: GeofenceHistoryEntry, previous?: GeofenceHistoryEntry): GeofenceChange[] {
+  const fields: [string, (h: GeofenceHistoryEntry) => string][] = [
+    ['Name', (h) => h.officeName || '—'],
+    ['Coordinates', (h) => `${formatCoord(h.latitude)}, ${formatCoord(h.longitude)}`],
+    ['Radius', (h) => `${h.radiusMeters} m`],
+    ['Accuracy', (h) => `±${h.maxAccuracyMeters} m`],
+    ['Location age', (h) => `${h.maxLocationAgeSeconds} s`],
+    ['Status', (h) => (h.isActive ? 'Active' : 'Inactive')],
+  ]
+  if (!previous) return []
+  return fields
+    .filter(([, read]) => read(entry) !== read(previous))
+    .map(([label, read]) => ({ label, from: read(previous), to: read(entry) }))
 }
 
 export function OfficeGeofence() {
@@ -135,6 +155,34 @@ export function OfficeGeofence() {
   const [isLocating, setIsLocating] = useState(false)
   const [locateNote, setLocateNote] = useState('')
   const [preview, setPreview] = useState<{ lat: number; lng: number; radius: number } | null>(null)
+  // The viewer's own location on the preview map, so they can see whether they are inside the radius
+  const [userFix, setUserFix] = useState<UserFix | null>(null)
+  const [isLocatingUser, setIsLocatingUser] = useState(false)
+  const [userLocateError, setUserLocateError] = useState('')
+
+  const locateUser = useCallback(async () => {
+    setIsLocatingUser(true)
+    setUserLocateError('')
+    try {
+      const fix = await getBrowserLocation()
+      setUserFix({ lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy })
+    } catch (err: unknown) {
+      setUserLocateError(errorMessage(err, 'Unable to get your current location.'))
+    } finally {
+      setIsLocatingUser(false)
+    }
+  }, [])
+
+  // Show the viewer's location straight away only if the browser already allows it (no surprise prompt)
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
+    navigator.permissions
+      .query({ name: 'geolocation' })
+      .then((status) => {
+        if (status.state === 'granted') locateUser()
+      })
+      .catch(() => {})
+  }, [locateUser])
 
   const load = useCallback(() => {
     if (!token) return Promise.resolve()
@@ -202,6 +250,7 @@ export function OfficeGeofence() {
     try {
       const fix = await getBrowserLocation()
       setForm((prev) => ({ ...prev, latitude: fix.latitude.toFixed(6), longitude: fix.longitude.toFixed(6) }))
+      setUserFix({ lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy })
       setFieldErrors((prev) => ({ ...prev, latitude: undefined, longitude: undefined }))
       setLocateNote(`Captured with about ±${Math.round(fix.accuracy)} m accuracy. Check the pin on the map before saving.`)
     } catch (err: unknown) {
@@ -248,19 +297,14 @@ export function OfficeGeofence() {
 
   if (isLoading) {
     return (
-      <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
-          <p className="text-sm font-semibold text-slate-500">Loading Office Location...</p>
-        </div>
-      </main>
+      <SkeletonPage cards={2} />
     )
   }
 
   if (loadError) {
     return (
       <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen flex items-center justify-center">
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-md text-center flex flex-col items-center gap-3">
+        <div className="glass-panel rounded-2xl border border-slate-200/70 p-6 max-w-md text-center flex flex-col items-center gap-3">
           <span className="material-symbols-outlined text-[32px] text-red-500">error</span>
           <p className="text-sm text-slate-600">{loadError}</p>
           <button
@@ -286,7 +330,7 @@ export function OfficeGeofence() {
     fieldErrors[key] ? <p className="text-[11.5px] text-red-600 font-medium">{fieldErrors[key]}</p> : null
 
   return (
-    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#faf9fd] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen">
       {/* Save Confirmation Modal */}
       {pendingSave && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
@@ -387,7 +431,7 @@ export function OfficeGeofence() {
         )}
 
         {/* Current saved configuration */}
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6">
+        <section className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6">
           <div className="flex items-center justify-between gap-3 pb-5 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center">
@@ -438,7 +482,7 @@ export function OfficeGeofence() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Edit form */}
-          <form onSubmit={handleSubmit} noValidate className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col gap-4">
+          <form onSubmit={handleSubmit} noValidate className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col gap-4">
             <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
               <div className="w-9 h-9 rounded-xl bg-red-50 border border-red-100 text-red-600 flex items-center justify-center">
                 <span className="material-symbols-outlined text-[20px]">edit_location_alt</span>
@@ -536,29 +580,65 @@ export function OfficeGeofence() {
           </form>
 
           {/* Location preview */}
-          <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col gap-4">
+          <section className="glass-panel rounded-2xl border border-slate-200/70 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6 flex flex-col gap-4">
             <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
               <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center">
                 <span className="material-symbols-outlined text-[20px]">map</span>
               </div>
               <div>
                 <h2 className="text-[16px] font-bold text-slate-900 tracking-tight">Location Preview</h2>
-                <p className="text-[12px] text-slate-500">OpenStreetMap view centred on the entered coordinates</p>
+                <p className="text-[12px] text-slate-500">Allowed radius and your current location</p>
               </div>
+              <button type="button" onClick={locateUser} disabled={isLocatingUser}
+                className="ml-auto px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shrink-0">
+                <span className="material-symbols-outlined text-[16px]">my_location</span>
+                {isLocatingUser ? 'Locating…' : userFix ? 'Refresh my location' : 'Show my location'}
+              </button>
             </div>
             {preview ? (
               <>
-                <iframe
-                  title="Office location preview"
-                  src={osmEmbedUrl(preview.lat, preview.lng, preview.radius)}
-                  className="w-full h-72 rounded-xl border border-slate-200"
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                />
-                <p className="text-[11.5px] text-slate-500">
-                  The pin marks the office centre; the view spans roughly {Math.round(Math.max(preview.radius * 2.5, 150) * 2)} m
-                  across. Employees must be within {preview.radius} m of the pin.
-                </p>
+                <GeofenceMap office={preview} radius={preview.radius} user={userFix} />
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-slate-500">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-600" />Office centre and {preview.radius} m radius</span>
+                  {userFix && (
+                    <span className="flex items-center gap-1.5">
+                      <span className={`w-2.5 h-2.5 rounded-full ${distanceMeters(preview, userFix) <= preview.radius ? 'bg-emerald-600' : 'bg-blue-600'}`} />
+                      You (dashed circle = location accuracy)
+                    </span>
+                  )}
+                </div>
+                {userFix && (() => {
+                  const distance = distanceMeters(preview, userFix)
+                  const inside = distance <= preview.radius
+                  const maxAccuracy = /^\s*\d+\s*$/.test(form.maxAccuracyMeters) ? Number(form.maxAccuracyMeters) : null
+                  const tooImprecise = maxAccuracy !== null && userFix.accuracy > maxAccuracy
+                  return (
+                    <div role="status" className={`rounded-xl border px-4 py-3 text-xs leading-relaxed ${
+                      !inside ? 'bg-blue-50 border-blue-200 text-blue-800'
+                        : tooImprecise ? 'bg-amber-50 border-amber-200 text-amber-900'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    }`}>
+                      <p className="font-bold text-[13px]">
+                        {inside ? 'You are inside the allowed area' : 'You are outside the allowed area'}
+                      </p>
+                      <p className="mt-0.5">
+                        {inside
+                          ? `${formatDistance(distance)} from the office centre (radius ${preview.radius} m).`
+                          : `${formatDistance(distance)} from the office centre, ${formatDistance(distance - preview.radius)} beyond the ${preview.radius} m radius.`}
+                        {' '}Location accuracy ±{Math.round(userFix.accuracy)} m.
+                      </p>
+                      {tooImprecise && (
+                        <p className="mt-1 text-amber-700">
+                          This accuracy is worse than the allowed ±{maxAccuracy} m, so a check-in from this device would be
+                          refused. Computers estimate location from Wi-Fi or IP; phones with GPS are much more precise.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
+                {userLocateError && (
+                  <p className="text-[11.5px] text-red-600">{userLocateError}</p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   <a href={`https://www.openstreetmap.org/?mlat=${preview.lat}&mlon=${preview.lng}#map=18/${preview.lat}/${preview.lng}`}
                     target="_blank" rel="noopener noreferrer"
@@ -581,8 +661,8 @@ export function OfficeGeofence() {
         </div>
 
         {/* Change history */}
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-6">
-          <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+        <section className="">
+          <div className="flex items-center gap-3 pb-2">
             <div className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 text-slate-600 flex items-center justify-center">
               <span className="material-symbols-outlined text-[20px]">history</span>
             </div>
@@ -594,32 +674,70 @@ export function OfficeGeofence() {
           {history.length === 0 ? (
             <p className="pt-4 text-sm text-slate-400">No changes recorded yet.</p>
           ) : (
-            <div className="pt-2 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-slate-400 uppercase tracking-wide">
-                    <th className="py-2 pr-3 font-bold">When</th>
-                    <th className="py-2 pr-3 font-bold">By</th>
-                    <th className="py-2 pr-3 font-bold">Coordinates</th>
-                    <th className="py-2 pr-3 font-bold">Radius</th>
-                    <th className="py-2 pr-3 font-bold">Limits</th>
-                    <th className="py-2 font-bold">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((h) => (
-                    <tr key={h.id} className="border-t border-slate-100 text-slate-700">
-                      <td className="py-2 pr-3 whitespace-nowrap">{formatDateTime(h.changedAt)}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">{h.changedBy?.name || '—'}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">{formatCoord(h.latitude)}, {formatCoord(h.longitude)}</td>
-                      <td className="py-2 pr-3">{h.radiusMeters} m</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">±{h.maxAccuracyMeters} m / {h.maxLocationAgeSeconds} s</td>
-                      <td className={`py-2 font-bold ${h.isActive ? 'text-emerald-600' : 'text-red-600'}`}>{h.isActive ? 'Active' : 'Inactive'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ul className="pt-2 flex flex-col gap-3">
+              {history.map((h, i) => {
+                const changes = describeChanges(h, history[i + 1])
+                return (
+                  <li key={h.id} className="glass-panel rounded-2xl p-4 flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                      h.isActive ? 'bg-emerald-50/80 border-emerald-100 text-emerald-600' : 'bg-red-50/80 border-red-100 text-red-600'
+                    }`}>
+                      <span className="material-symbols-outlined text-[20px]">{h.isActive ? 'edit_location_alt' : 'location_off'}</span>
+                    </div>
+
+                    <div className="flex flex-col gap-2 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="text-sm font-bold text-slate-900">{h.officeName || 'Office location'}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                          h.isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
+                        }`}>
+                          {h.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                        {i === 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-900 text-white">Current</span>
+                        )}
+                      </div>
+
+                      {/* What changed compared with the previous entry */}
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        {changes.length === 0 ? (
+                          <span className="text-slate-400">{history[i + 1] ? 'Saved without changes' : 'Initial setup'}</span>
+                        ) : (
+                          changes.map((c, j) => (
+                            <span key={c.label}>
+                              {j > 0 && <span className="text-slate-300"> · </span>}
+                              <span className="text-slate-500">{c.label} </span>
+                              {c.from !== null && <span className="text-slate-400 line-through decoration-slate-300">{c.from}</span>}
+                              {c.from !== null && <span className="text-slate-400"> → </span>}
+                              <span className="font-semibold text-slate-800">{c.to}</span>
+                            </span>
+                          ))
+                        )}
+                      </p>
+
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          ['Radius', `${h.radiusMeters} m`],
+                          ['Accuracy', `±${h.maxAccuracyMeters} m`],
+                          ['Location age', `${h.maxLocationAgeSeconds} s`],
+                          ['Coordinates', `${formatCoord(h.latitude)}, ${formatCoord(h.longitude)}`],
+                        ].map(([label, value]) => (
+                          <span key={label} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50/80 border border-slate-200/70 text-[11px]">
+                            <span className="text-slate-400">{label}</span>
+                            <span className={`font-semibold text-slate-700 ${label === 'Coordinates' ? 'font-mono' : ''}`}>{value}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex sm:flex-col sm:items-end gap-x-2 text-[11px] text-slate-500 sm:text-right shrink-0">
+                      <span className="font-semibold text-slate-700">{formatDateTime(h.changedAt)}</span>
+                      <span>by {h.changedBy?.name || 'Unknown'}{h.changedBy?.employeeId ? ` (${h.changedBy.employeeId})` : ''}</span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
           )}
         </section>
       </div>

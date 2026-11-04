@@ -57,3 +57,18 @@ export function getBrowserLocation(timeoutMs = 20000): Promise<AttendanceLocatio
     )
   })
 }
+
+export interface MapPoint {
+  lat: number
+  lng: number
+}
+
+/** Great-circle distance in metres; same formula and earth radius as public.geofence_distance_m on the server. */
+export function distanceMeters(a: MapPoint, b: MapPoint): number {
+  const R = 6371008.8
+  const rad = (d: number) => (d * Math.PI) / 180
+  const h =
+    Math.sin(rad(b.lat - a.lat) / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
+}

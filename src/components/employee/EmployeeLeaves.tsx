@@ -38,6 +38,7 @@ import {
   History,
   Users
 } from 'lucide-react'
+import { SkeletonCards } from '../Skeleton'
 
 export function EmployeeLeaves() {
   const { token, employee, logout, updateEmployee } = useAuth()
@@ -575,7 +576,7 @@ export function EmployeeLeaves() {
       {/* Leave Balance Bento Pods */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Casual Leave Balance */}
-        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-4 relative overflow-hidden">
+        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/70 space-y-4 relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Casual Leave (CL)</span>
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -608,7 +609,7 @@ export function EmployeeLeaves() {
         </div>
 
         {/* Sick Leave Balance */}
-        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-4 relative overflow-hidden">
+        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/70 space-y-4 relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Sick Leave (SL)</span>
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-purple-50 text-purple-700 border border-purple-200">
@@ -641,7 +642,7 @@ export function EmployeeLeaves() {
         </div>
 
         {/* Loss of Pay Indicator */}
-        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/80 space-y-4 relative overflow-hidden sm:col-span-2 lg:col-span-1">
+        <div className="glass-card rounded-3xl p-6 shadow-xs border border-slate-200/70 space-y-4 relative overflow-hidden sm:col-span-2 lg:col-span-1">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Loss of Pay (LOP)</span>
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-50 text-amber-700 border border-amber-200">
@@ -672,7 +673,7 @@ export function EmployeeLeaves() {
       {/* Main Content Area: Leave Application Form & History */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Form: Apply for Leave with EXACT ANDROID CALENDAR (7 Columns) */}
-        <div className="lg:col-span-7 glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/80 space-y-5">
+        <div className="lg:col-span-7 glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/70 space-y-5">
           <div className="flex items-center justify-between pb-4 border-b border-slate-100">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl bg-red-50 text-red-600 flex items-center justify-center font-bold">
@@ -1068,7 +1069,7 @@ export function EmployeeLeaves() {
         </div>
 
         {/* Leave Requests Ledger / History (5 Columns) */}
-        <div className="lg:col-span-5 glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/80 space-y-5">
+        <div className="lg:col-span-5 glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/70 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
             <div>
               <h2 className="text-base font-bold text-slate-900">My Leave Applications</h2>
@@ -1098,10 +1099,7 @@ export function EmployeeLeaves() {
 
           {/* List of Leave Applications */}
           {isLoading ? (
-            <div className="py-16 text-center flex flex-col items-center justify-center space-y-3">
-              <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
-              <p className="text-xs font-bold text-slate-500">Loading Leave Records...</p>
-            </div>
+            <SkeletonCards count={4} />
           ) : filteredLeaves.length === 0 ? (
             <div className="py-16 text-center flex flex-col items-center justify-center space-y-3">
               <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center">
@@ -1126,7 +1124,7 @@ export function EmployeeLeaves() {
                 return (
                   <div
                     key={lv.id || lv.requestId}
-                    className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all space-y-3"
+                    className="p-4 rounded-2xl glass-panel border border-slate-200/70 shadow-xs hover:border-slate-300 transition-all space-y-3"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-1">

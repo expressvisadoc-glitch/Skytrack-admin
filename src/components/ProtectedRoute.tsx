@@ -11,7 +11,7 @@ export function ProtectedRoute({ children, adminOnly = false }: ProtectedRoutePr
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#f4f6fb] flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <span className="w-8 h-8 rounded-full bg-red-500 animate-ping"></span>
           <p className="text-sm font-semibold text-slate-500">Verifying Clearance...</p>
@@ -27,7 +27,7 @@ export function ProtectedRoute({ children, adminOnly = false }: ProtectedRoutePr
 
   if (adminOnly && !isAdmin) {
     return (
-      <div className="min-h-screen bg-[#f4f6fb] flex flex-col items-center justify-center p-8 text-center">
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8 text-center">
         <div className="w-20 h-20 rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-6 shadow-sm border border-red-100">
           <span className="material-symbols-outlined text-[40px]">gpp_bad</span>
         </div>

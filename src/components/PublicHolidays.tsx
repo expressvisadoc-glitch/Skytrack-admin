@@ -726,7 +726,7 @@ export function PublicHolidays() {
         {/* Bento Metric Glass Pods (3-Card Style matching updated specification) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* Card 1: Gazetted Holidays */}
-          <div className="relative overflow-hidden bg-white/80 backdrop-blur-xl rounded-3xl p-6 shadow-glass border border-white/80 flex flex-col justify-between group hover:shadow-floating transition-all">
+          <div className="relative overflow-hidden glass-panel rounded-3xl p-6 border border-slate-200/70 flex flex-col justify-between group hover:shadow-floating transition-all">
             <div className="absolute -right-6 -top-6 w-28 h-28 rounded-full bg-brand-500/10 blur-xl pointer-events-none"></div>
 
             <div className="flex items-center justify-between">
@@ -760,7 +760,7 @@ export function PublicHolidays() {
           </div>
 
           {/* Card 2: Restricted / Optional */}
-          <div className="relative overflow-hidden bg-white/80 backdrop-blur-xl rounded-3xl p-6 shadow-glass border border-white/80 flex flex-col justify-between hover:shadow-floating transition-all">
+          <div className="relative overflow-hidden glass-panel rounded-3xl p-6 border border-slate-200/70 flex flex-col justify-between hover:shadow-floating transition-all">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
                 Restricted / Optional
@@ -795,7 +795,7 @@ export function PublicHolidays() {
           </div>
 
           {/* Card 3: Upcoming Holiday */}
-          <div className="relative overflow-hidden bg-white/80 backdrop-blur-xl rounded-3xl p-6 shadow-glass border border-white/80 flex flex-col justify-between hover:shadow-floating transition-all">
+          <div className="relative overflow-hidden glass-panel rounded-3xl p-6 border border-slate-200/70 flex flex-col justify-between hover:shadow-floating transition-all">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
                 Upcoming Holiday
@@ -947,7 +947,7 @@ export function PublicHolidays() {
           </div>
 
           {/* Glass Filter Toolbar */}
-          <div className="p-3 bg-white/80 backdrop-blur-xl rounded-2xl border border-white/80 shadow-glass flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          <div className="p-3 glass-panel rounded-2xl border border-slate-200/70 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
             <div className="flex items-center gap-2 px-3.5 py-2 bg-slate-50 rounded-xl flex-1 max-w-md border border-slate-200/60 focus-within:ring-2 focus-within:ring-brand-500/20 focus-within:border-brand-500 transition-all">
               <span className="material-symbols-outlined text-slate-400 text-[18px]">
                 search
@@ -1021,7 +1021,7 @@ export function PublicHolidays() {
 
         {/* Calendar Matrix View Mode */}
         {activeTab === 'matrix' ? (
-          <div className="bg-white/80 backdrop-blur-xl rounded-3xl p-7 shadow-glass border border-white/80 flex flex-col gap-6">
+          <div className="glass-panel rounded-3xl p-7 border border-slate-200/70 flex flex-col gap-6">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">
@@ -1087,7 +1087,7 @@ export function PublicHolidays() {
                           onClick={() => setSelectedHolidayId(h.id)}
                           className={`p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${selectedHolidayId === h.id
                               ? 'bg-brand-50 border-brand-300 ring-2 ring-brand-500/20'
-                              : 'bg-white border-slate-200/60 hover:bg-slate-100/70'
+                              : 'glass-panel border-slate-200/70 hover:bg-slate-100/70'
                             }`}
                         >
                           <div className="flex items-center justify-between">
@@ -1121,8 +1121,8 @@ export function PublicHolidays() {
         {/* Primary Workspace */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
           {/* Left Column: Schedule Table */}
-          <div className="xl:col-span-8 bg-white/80 backdrop-blur-xl rounded-3xl shadow-glass border border-white/80 overflow-hidden flex flex-col">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="xl:col-span-8 flex flex-col">
+            <div className="px-1 pb-1 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <span className="text-base font-bold text-slate-900">
                   Official Indian Holiday Schedule ({currentYear})
@@ -1144,9 +1144,9 @@ export function PublicHolidays() {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50/70 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+            <div className="overflow-x-auto -mx-2 px-2">
+              <table className="item-list item-list-zoom w-full text-left text-xs">
+                <thead className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   <tr>
                     <th className="px-6 py-3.5">Date / Code</th>
                     <th className="px-4 py-3.5">Holiday Details</th>
@@ -1156,7 +1156,7 @@ export function PublicHolidays() {
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-slate-100/80">
+                <tbody className="">
                   {paginatedHolidays.length === 0 ? (
                     <tr>
                       <td
@@ -1417,7 +1417,7 @@ export function PublicHolidays() {
             ref={formSectionRef}
             className="xl:col-span-4 flex flex-col gap-5"
           >
-            <div className="bg-white/80 backdrop-blur-xl rounded-3xl p-6 shadow-glass border border-white/80 flex flex-col gap-4">
+            <div className="glass-panel rounded-3xl p-6 border border-slate-200/70 flex flex-col gap-4">
               <div className="flex items-center justify-between pb-1">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">

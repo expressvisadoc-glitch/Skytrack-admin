@@ -284,9 +284,16 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 | `admin_payslip_get` | Admin | Any employee's payslip for a month (optional `version`). |
 | `admin_payroll_policy` | Admin | Returns payroll settings (week-off days, late grace/conversion, office timezone) and change history. |
 | `admin_save_payroll_policy` | Admin | Validates and saves payroll settings. |
+| `notifications_list` / `notifications_mark_read` | Employee (own), admin feed with `audience: "admin"` | Notification inbox and read state. |
+| `device_register` / `device_unregister` | Employee | Push token of the signed-in phone. |
+| `notifications_dispatch` | pg_cron only (`x-skytrack-dispatch-secret`) | Sends pending pushes through Firebase. |
 
 ### 4.3. Office Geofencing
 Check-in and check-out go through `attendance_action_with_location`, which reads the latest `office_geofence_settings`, validates the submitted fix (accuracy, freshness, timestamp, mock flag), checks the radius, calls the existing attendance RPC and records an `attendance_location_events` row in one transaction. Missing or inactive settings block check-in/out (HTTP 409). Location rejections return HTTP 422 with `error` codes such as `outside_geofence`. Full policy, error codes and rollout steps: [docs/OFFICE_GEOFENCING.md](docs/OFFICE_GEOFENCING.md).
+Maps (OpenStreetMap, no API key): the admin Office Geofence page (Leaflet, `GeofenceMap.tsx`) and the Android Home
+location card (osmdroid, `ui/home/GeofenceMap.kt`) show the office badge, the radius zone (tinted, no border) with its length, and the
+viewer's own position as a location dot with an accuracy circle (green inside, blue outside). Distances use the
+server's formula; the map is guidance only, the server decides at check-in/out.
 
 ### 4.4. Payroll
 Planned on branch `feature/payroll` (built on `feature/office-geofencing`). **Phase 0 is implemented** there:
@@ -302,6 +309,15 @@ from the Monthly page (web and Android). While a month is locked, the database r
 published-holiday and backdated-salary changes for it (SQLSTATE `PLOCK`; Edge Function returns 409 `payroll_month_locked`). Rules, architecture, phases and the decision log: [docs/PAYROLL_PLAN.md](docs/PAYROLL_PLAN.md).
 Development uses the staging Supabase project only.
 
+
+### 4.5. Notifications
+Built on `feature/payroll` (staging only). Employees get push notifications (Firebase Cloud Messaging) and an in-app
+inbox (bell on Android Home) for shift reminders, late/absent/break/checkout alerts, leave decisions, holidays,
+payslips and salary changes. Admins get alerts in the web bell panel only. Rows live in `notifications`, created by
+triggers, the per-minute `pg_cron` job `skytrack-notifications` (`notifications_tick`) and Edge Function hooks; pg_cron
+asks the Edge Function (`notifications_dispatch`, shared secret) to send pending pushes. The Profile "Punch-in Alerts"
+switch turns all phone notifications on/off (default on). Catalogue, secrets, Firebase setup and tests:
+[docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md).
 
 **Next steps:** production rollout order and rollback in [docs/PRODUCTION_ROLLOUT.md](docs/PRODUCTION_ROLLOUT.md);
 after go-live, the monthly Google Sheets archive in [docs/GOOGLE_SHEETS_EXPORT.md](docs/GOOGLE_SHEETS_EXPORT.md)
@@ -358,7 +374,8 @@ after go-live, the monthly Google Sheets archive in [docs/GOOGLE_SHEETS_EXPORT.m
 
 ### Web Portal (`skytrack-admin`)
 ```bash
-# Start local dev server (port 5173)
+# Start local dev server (port 5173). On this Mac it uses STAGING: .env.development.local (git-ignored)
+# is a copy of .env.staging.local. The live site is built by Cloudflare from main and is not affected.
 npm run dev
 
 # Run TypeScript check and production build
@@ -370,8 +387,13 @@ git add -A && git commit -m "your message" && git push origin main
 
 ### Android Mobile App (`SkyTrack_01`)
 ```bash
-# Clean and assemble debug APK
+# Debug builds (Android Studio Run / Build APK, assembleDebug) are STAGING builds on feature/payroll:
+# "SkyTrack Staging", com.skypass.skytrack.staging, staging server (skytrackStagingApiUrl in
+# ~/.gradle/gradle.properties). They install next to the live app and never touch production.
 ./gradlew clean assembleDebug
+
+# Production (live) app: release build only, com.skypass.skytrack, production server
+./gradlew assembleRelease
 
 # Run unit tests
 ./gradlew test
@@ -413,8 +435,10 @@ Production is only changed later, deliberately, by following [docs/OFFICE_GEOFEN
 | Staging project | `npwwwapbbvkvteycxaab`, free plan, same Supabase account as production |
 | Schema | Copy of production `public` schema (11 tables, 18 functions, 18 policies, real attendance RPCs); no production data |
 | Migration | `20261025000000_office_geofence.sql` applied (including the date-linking fix) |
+| Notifications | `20261028000000_notifications.sql` applied, cron job running, dispatch secret + Vault + Firebase key set; real pushes verified on the staging app |
 | Edge Function | `skytrack-api` from `feature/office-geofencing`, `verify_jwt = false`, ACTIVE |
 | Test accounts | `TST-ADMIN` (admin), `TST-001`, `TST-002` (employees); passwords in `~/skytrack-staging/test-accounts.txt` |
+| Production data copy | 4 Nov 2026: production employees, departments, shifts, attendance, leaves, balances and holidays copied into staging (read-only export; production unchanged). Late marks computed for the copied days. Copied employees sign in with a staging-only password (in `test-accounts.txt`). Backup of the previous staging data: `~/skytrack-staging/backups/` |
 | Smoke test vs real backend | 26/27 passed; the one failure is the pre-existing UTC/IST date issue (§7.6) |
 | Local test suite | 103/103 (stub schema now mirrors the real RPC behaviour) |
 | Android | `~/skytrack-staging/SkyTrack-Staging-geofence.apk` built, 29/29 unit tests |

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { LogOut } from 'lucide-react'
+import { ThemeToggle } from '../ThemeToggle'
 
 export function EmployeeHeader({ 
   onSelectTab, 
@@ -57,6 +58,8 @@ export function EmployeeHeader({
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
           <span>Active Session</span>
         </div>
+
+        <ThemeToggle />
 
         {/* Employee Profile Pill */}
         <button

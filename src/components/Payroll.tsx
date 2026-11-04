@@ -10,8 +10,11 @@ import {
   type PayrollRunInfo,
 } from '../lib/api'
 import { currentUtcMonth, formatDays, salaryFlagLabel, salaryStatusMessage } from '../lib/salary'
+import { openEmployeeScreen } from '../lib/navigation'
+import { ShortcutArrow } from './ShortcutArrow'
 import { downloadPayslipPdf } from '../lib/payslipPdf'
 import { EmptyState } from './EmptyState'
+import { SkeletonTable } from './Skeleton'
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback
@@ -173,7 +176,7 @@ export function Payroll() {
   const needsAttention = rows.filter((r) => r.salary.status !== 'ok' || (r.salary.flags ?? []).length > 0).length
 
   return (
-    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 bg-[#faf9fd] min-h-screen">
+    <main className="relative w-full pt-28 px-4 sm:px-8 pb-14 min-h-screen">
       {/* Lock confirmation */}
       {confirmLock && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
@@ -189,7 +192,12 @@ export function Payroll() {
                 <p className="font-semibold mb-1">No payslip for {withoutPayslip.length} employee{withoutPayslip.length === 1 ? '' : 's'}:</p>
                 <ul className="list-disc pl-4">
                   {withoutPayslip.map((r) => (
-                    <li key={r.employee.id}>{r.employee.name} — {salaryStatusMessage(r.salary)}</li>
+                    <li key={r.employee.id} className="group/item flex items-center gap-1.5">
+                      {r.employee.name} — {salaryStatusMessage(r.salary)}
+                      {r.salary.status === 'no_salary' && (
+                        <ShortcutArrow label={`Set ${r.employee.name}'s salary`} onClick={() => openEmployeeScreen('employees', r.employee.employeeId, 'salary')} />
+                      )}
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -306,7 +314,7 @@ export function Payroll() {
             ['Deductions', amount(totals.deductions)],
             [isLocked ? 'Net payable' : 'Expected net', amount(totals.net)],
           ].map(([label, value]) => (
-            <div key={label} className="bg-white rounded-2xl border border-slate-200/80 p-4 flex flex-col gap-1">
+            <div key={label} className="glass-panel rounded-2xl border border-slate-200/70 p-4 flex flex-col gap-1">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">{label}</span>
               <span className="text-xl font-extrabold text-slate-900">{value}</span>
             </div>
@@ -319,9 +327,9 @@ export function Payroll() {
           </div>
         )}
 
-        <section className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-2 sm:p-4">
+        <section className="">
           {isLoading ? (
-            <p className="p-6 text-sm text-slate-400">Loading payroll…</p>
+            <SkeletonTable columns={8} />
           ) : error ? (
             <div className="p-6 flex items-center justify-between gap-3 text-sm text-red-700">
               <span>{error}</span>
@@ -331,7 +339,7 @@ export function Payroll() {
             <EmptyState icon="group_off" title="No employees for this month" description="Active employees and anyone with attendance in the month appear here." />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="item-list w-full text-sm">
                 <thead>
                   <tr className="text-left text-[11px] text-slate-400 uppercase tracking-wide">
                     <th className="py-2.5 px-3 font-bold">Employee</th>
@@ -350,27 +358,60 @@ export function Payroll() {
                     const { employee, salary } = row
                     const message = salaryStatusMessage(salary)
                     return (
-                      <tr key={employee.id} className="border-t border-slate-100 align-top">
+                      <tr key={employee.id} className="align-top hover:bg-slate-50/70 transition-colors">
                         <td className="py-3 px-3">
                           <div className="flex flex-col">
-                            <span className="font-semibold text-slate-800">{employee.name}</span>
+                            <span className="group/item flex items-center gap-1.5 self-start">
+                              <span className="font-semibold text-slate-800">{employee.name}</span>
+                              <ShortcutArrow label={`Open ${employee.name}'s employee details`} onClick={() => openEmployeeScreen('employees', employee.employeeId)} />
+                            </span>
                             <span className="text-[11.5px] text-slate-400">{employee.employeeId}{employee.designation ? ` · ${employee.designation}` : ''}</span>
                             {(salary.flags ?? []).map((flag) => (
-                              <span key={flag} className="mt-1 text-[11px] text-amber-700">{salaryFlagLabel(flag)}</span>
+                              <span key={flag} className="group/item mt-1 flex items-center gap-1.5 self-start text-[11px] text-amber-700">
+                                {salaryFlagLabel(flag)}
+                                {/* "Salary not set yet." already links to the salary when there is none */}
+                                {!(flag === 'salary_not_set' && salary.status === 'no_salary') && (
+                                  <ShortcutArrow
+                                    label={flag === 'salary_not_set' ? `Set ${employee.name}'s salary` : `Fix in ${employee.name}'s employee details`}
+                                    onClick={() => openEmployeeScreen('employees', employee.employeeId, flag === 'salary_not_set' ? 'salary' : undefined)}
+                                  />
+                                )}
+                              </span>
                             ))}
                           </div>
                         </td>
                         {message ? (
-                          <td colSpan={isLocked ? 8 : 7} className="py-3 px-3 text-slate-500">{message}{isLocked ? ' No payslip issued.' : ''}</td>
+                          <td colSpan={isLocked ? 8 : 7} className="py-3 px-3 text-slate-500">
+                            <span className="group/item inline-flex items-center gap-1.5">
+                              {message}{isLocked ? ' No payslip issued.' : ''}
+                              {salary.status === 'no_salary' && (
+                                <ShortcutArrow label={`Set ${employee.name}'s salary`} onClick={() => openEmployeeScreen('employees', employee.employeeId, 'salary')} />
+                              )}
+                            </span>
+                          </td>
                         ) : (
                           <>
                             <td className="py-3 px-3 text-right whitespace-nowrap">{amount(salary.monthlyGross)}</td>
                             <td className="py-3 px-3 text-right">{formatDays(salary.paidWorkingDays)} / {formatDays(salary.workingDaysInMonth)}</td>
-                            <td className="py-3 px-3 text-right">{formatDays(salary.absenceDays)}</td>
+                            <td className="py-3 px-3 text-right">
+                              <span className="group/item inline-flex items-center justify-end gap-1.5">
+                                {(salary.absenceDays ?? 0) > 0 && (
+                                  <ShortcutArrow label={`See ${employee.name}'s attendance`} onClick={() => openEmployeeScreen('attendance', employee.employeeId)} />
+                                )}
+                                {formatDays(salary.absenceDays)}
+                              </span>
+                            </td>
                             <td className="py-3 px-3 text-right">{formatDays(salary.lopLeaveDays)}</td>
                             <td className="py-3 px-3 text-right">
-                              {salary.lateMarks ?? 0}
-                              {salary.lateLopDays ? <span className="text-[11px] text-slate-400"> ({formatDays(salary.lateLopDays)} d)</span> : null}
+                              <span className="group/item inline-flex items-center justify-end gap-1.5">
+                                {(salary.lateMarks ?? 0) > 0 && (
+                                  <ShortcutArrow label={`See ${employee.name}'s late check-ins`} onClick={() => openEmployeeScreen('attendance', employee.employeeId)} />
+                                )}
+                                <span>
+                                  {salary.lateMarks ?? 0}
+                                  {salary.lateLopDays ? <span className="text-[11px] text-slate-400"> ({formatDays(salary.lateLopDays)} d)</span> : null}
+                                </span>
+                              </span>
                             </td>
                             <td className="py-3 px-3 text-right text-red-600 whitespace-nowrap">{amount(salary.totalDeductions)}</td>
                             <td className="py-3 px-3 text-right font-bold text-emerald-700 whitespace-nowrap">{amount(salary.netPay)}</td>
@@ -398,7 +439,7 @@ export function Payroll() {
         </section>
 
         {run && run.events.length > 0 && (
-          <section className="bg-white rounded-2xl border border-slate-200/80 p-6">
+          <section className="glass-panel rounded-2xl border border-slate-200/70 p-6">
             <h2 className="text-[16px] font-bold text-slate-900 tracking-tight mb-3">Lock history</h2>
             <ul className="flex flex-col gap-2 text-sm">
               {run.events.map((e, i) => (

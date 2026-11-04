@@ -7,9 +7,13 @@ import {
   rejectLeave,
   getAttendancePunchFeed,
   formatWorkedDuration,
+  getNotifications,
+  markNotificationsRead,
+  type AppNotification,
   type LeaveSubmissionRecord,
   type AttendancePunchEvent,
 } from '../lib/api'
+import { SkeletonCards } from './Skeleton'
 
 export interface PasswordResetRequest {
   id: string
@@ -26,23 +30,44 @@ export interface PasswordResetRequest {
 
 export interface AttendanceAlertItem {
   id: string
-  employeeId: string
-  name: string
-  type: 'geofence' | 'late' | 'missing_checkout'
+  type: 'geofence' | 'attendance' | 'payroll'
   title: string
   description: string
-  location?: string
   timeAgo: string
   severity: 'high' | 'medium'
-  status: 'pending' | 'acknowledged'
+  tab: string
 }
 
 const DEFAULT_PASSWORD_REQUESTS: PasswordResetRequest[] = []
 
-const DEFAULT_ATTENDANCE_ALERTS: AttendanceAlertItem[] = []
-
 const STORAGE_KEY_PWD_REQUESTS = 'skytrack_admin_password_requests'
+// Alerts used to be kept here; they now come from the server
 const STORAGE_KEY_ATT_ALERTS = 'skytrack_admin_attendance_alerts'
+
+// New leave requests already appear in the pending leaves section
+const ALERT_EXCLUDED_TYPES = ['leave_submitted']
+const ALERT_POLL_MS = 60000
+
+const ALERT_LABELS: Record<AttendanceAlertItem['type'], { badge: string; icon: string; action: string }> = {
+  geofence: { badge: 'Geofence', icon: 'wrong_location', action: 'Review Attendance Log' },
+  attendance: { badge: 'Attendance', icon: 'timer_off', action: 'Review Attendance Log' },
+  payroll: { badge: 'Payroll', icon: 'payments', action: 'Open Payroll' },
+}
+
+function toAlertItem(n: AppNotification): AttendanceAlertItem {
+  const tab = typeof n.data?.tab === 'string' ? n.data.tab : 'attendance'
+  const type: AttendanceAlertItem['type'] =
+    n.type.startsWith('geofence') ? 'geofence' : n.type.startsWith('payroll') ? 'payroll' : 'attendance'
+  return {
+    id: n.id,
+    type,
+    title: n.title,
+    description: n.body,
+    timeAgo: getRelativeTime(n.createdAt),
+    severity: n.type === 'geofence_mock' || n.type === 'geofence_off' ? 'high' : 'medium',
+    tab: type === 'geofence' && n.type === 'geofence_off' ? 'office-geofence' : tab,
+  }
+}
 
 function getRelativeTime(timestampStr: string): string {
   try {
@@ -83,13 +108,7 @@ export function NotificationPanel({
     } catch { }
     return DEFAULT_PASSWORD_REQUESTS
   })
-  const [attendanceAlerts, setAttendanceAlerts] = useState<AttendanceAlertItem[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_ATT_ALERTS)
-      if (saved) return JSON.parse(saved)
-    } catch { }
-    return DEFAULT_ATTENDANCE_ALERTS
-  })
+  const [attendanceAlerts, setAttendanceAlerts] = useState<AttendanceAlertItem[]>([])
 
   const [isLoading, setIsLoading] = useState(false)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
@@ -110,9 +129,9 @@ export function NotificationPanel({
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_ATT_ALERTS, JSON.stringify(attendanceAlerts))
+      localStorage.removeItem(STORAGE_KEY_ATT_ALERTS)
     } catch { }
-  }, [attendanceAlerts])
+  }, [])
 
   const showToast = (msg: string) => {
     setToastMessage(msg)
@@ -143,16 +162,34 @@ export function NotificationPanel({
     }
   }, [token])
 
+  // Unread admin notifications (geofence, attendance and payroll alerts) from the server
+  const loadAlerts = useCallback(async () => {
+    if (!token) return
+    try {
+      const result = await getNotifications(token, { audience: 'admin', limit: 50, excludeTypes: ALERT_EXCLUDED_TYPES })
+      setAttendanceAlerts(result.notifications.filter((n) => !n.readAt).map(toAlertItem))
+    } catch (err) {
+      console.error('Failed to load admin alerts for notification panel:', err)
+    }
+  }, [token])
+
+  // Keep the bell count current while the panel is closed
+  useEffect(() => {
+    loadAlerts()
+    const interval = setInterval(loadAlerts, ALERT_POLL_MS)
+    return () => clearInterval(interval)
+  }, [loadAlerts])
+
   // Combined refresh
   const refreshAll = useCallback(async () => {
     if (!token) return
     setIsLoading(true)
     try {
-      await Promise.all([loadPendingLeaves(), loadPunches()])
+      await Promise.all([loadPendingLeaves(), loadPunches(), loadAlerts()])
     } finally {
       setIsLoading(false)
     }
-  }, [token, loadPendingLeaves, loadPunches])
+  }, [token, loadPendingLeaves, loadPunches, loadAlerts])
 
   useEffect(() => {
     if (isOpen) {
@@ -168,7 +205,7 @@ export function NotificationPanel({
   // Compute pending counts
   const pendingLeaves = useMemo(() => leaves.filter((l) => l.status.toLowerCase() === 'pending'), [leaves])
   const pendingPasswords = useMemo(() => passwordRequests.filter((p) => p.status === 'pending'), [passwordRequests])
-  const pendingAlerts = useMemo(() => attendanceAlerts.filter((a) => a.status === 'pending'), [attendanceAlerts])
+  const pendingAlerts = attendanceAlerts
 
   const totalActionableCount = pendingLeaves.length + pendingPasswords.length + pendingAlerts.length
 
@@ -239,17 +276,34 @@ export function NotificationPanel({
   }
 
   // Attendance Alert Actions
-  const handleAcknowledgeAlert = (id: string) => {
-    setAttendanceAlerts((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status: 'acknowledged' as const } : a))
-    )
-    showToast('Alert acknowledged')
+  const handleAcknowledgeAlert = async (id: string) => {
+    if (!token) return
+    setUpdatingId(id)
+    try {
+      await markNotificationsRead(token, { audience: 'admin', ids: [id] })
+      setAttendanceAlerts((prev) => prev.filter((a) => a.id !== id))
+      showToast('Alert acknowledged')
+    } catch (err) {
+      console.error('Error acknowledging alert:', err)
+      showToast(err instanceof Error && err.message ? err.message : 'Failed to acknowledge the alert.')
+    } finally {
+      setUpdatingId(null)
+    }
   }
 
   // Mark all as read/resolved
-  const handleMarkAllRead = () => {
+  const handleMarkAllRead = async () => {
     setPasswordRequests((prev) => prev.map((r) => ({ ...r, status: 'resolved' as const })))
-    setAttendanceAlerts((prev) => prev.map((a) => ({ ...a, status: 'acknowledged' as const })))
+    if (token && attendanceAlerts.length > 0) {
+      try {
+        await markNotificationsRead(token, { audience: 'admin', all: true })
+        setAttendanceAlerts([])
+      } catch (err) {
+        console.error('Error marking alerts as handled:', err)
+        showToast(err instanceof Error && err.message ? err.message : 'Failed to mark alerts as handled.')
+        return
+      }
+    }
     showToast('All alerts and password requests marked as resolved')
   }
 
@@ -274,7 +328,7 @@ export function NotificationPanel({
         <div className="bg-white rounded-3xl shadow-2xl border border-slate-200/80 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
 
           {/* Panel Header */}
-          <div className="p-5 pb-3 bg-white border-b border-slate-100">
+          <div className="p-5 pb-3 bg-white/50 border-b border-slate-100">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
@@ -404,12 +458,9 @@ export function NotificationPanel({
           )}
 
           {/* Scrollable Items Container */}
-          <div className="flex flex-col overflow-y-auto p-4 gap-3 bg-slate-50/70 divide-y divide-slate-100">
+          <div className="flex flex-col overflow-y-auto p-4 gap-3 bg-slate-50/70">
             {isLoading && (
-              <div className="p-8 flex flex-col items-center justify-center text-center gap-2">
-                <span className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin"></span>
-                <span className="text-xs text-slate-500 font-medium">Loading live workforce activity...</span>
-              </div>
+              <SkeletonCards count={4} />
             )}
 
             {/* Empty State */}
@@ -433,7 +484,7 @@ export function NotificationPanel({
                 return (
                   <div
                     key={`punch-${punch.id}`}
-                    className="bg-white rounded-2xl p-3.5 shadow-xs border border-slate-200/80 hover:shadow-md transition-all relative group"
+                    className="glass-panel rounded-2xl p-3.5 shadow-xs border border-slate-200/70 hover:shadow-md transition-all relative group"
                   >
                     <div
                       className={`absolute left-0 top-3 bottom-3 w-1.5 rounded-r-full ${isCheckIn
@@ -554,7 +605,7 @@ export function NotificationPanel({
                 return (
                   <div
                     key={`leave-${leave.id}`}
-                    className="bg-white rounded-2xl p-4 shadow-xs border border-slate-200/80 hover:shadow-md transition-all relative group"
+                    className="glass-panel rounded-2xl p-4 shadow-xs border border-slate-200/70 hover:shadow-md transition-all relative group"
                   >
                     <div className="absolute left-0 top-3 bottom-3 w-1.5 bg-red-500 rounded-r-full"></div>
                     <div className="flex items-start gap-3 pl-1.5">
@@ -638,7 +689,7 @@ export function NotificationPanel({
               pendingPasswords.map((req) => (
                 <div
                   key={`pwd-${req.id}`}
-                  className="bg-white rounded-2xl p-4 shadow-xs border border-slate-200/80 hover:shadow-md transition-all relative group"
+                  className="glass-panel rounded-2xl p-4 shadow-xs border border-slate-200/70 hover:shadow-md transition-all relative group"
                 >
                   <div className="absolute left-0 top-3 bottom-3 w-1.5 bg-amber-500 rounded-r-full"></div>
                   <div className="flex items-start gap-3 pl-1.5">
@@ -707,7 +758,7 @@ export function NotificationPanel({
               pendingAlerts.map((alert) => (
                 <div
                   key={`att-${alert.id}`}
-                  className="bg-white rounded-2xl p-4 shadow-xs border border-slate-200/80 hover:shadow-md transition-all relative group"
+                  className="glass-panel rounded-2xl p-4 shadow-xs border border-slate-200/70 hover:shadow-md transition-all relative group"
                 >
                   <div className={`absolute left-0 top-3 bottom-3 w-1.5 rounded-r-full ${alert.severity === 'high' ? 'bg-red-500' : 'bg-indigo-500'
                     }`}></div>
@@ -718,7 +769,7 @@ export function NotificationPanel({
                         : 'bg-indigo-50 border-indigo-200 text-indigo-600'
                       }`}>
                       <span className="material-symbols-outlined text-[20px]">
-                        {alert.type === 'geofence' ? 'wrong_location' : 'timer_off'}
+                        {ALERT_LABELS[alert.type].icon}
                       </span>
                     </div>
 
@@ -726,15 +777,12 @@ export function NotificationPanel({
                     <div className="flex flex-col flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-slate-900 text-sm">{alert.name}</span>
-                          <span className="text-[11px] font-semibold text-slate-500">
-                            ({alert.employeeId})
-                          </span>
+                          <span className="font-bold text-slate-900 text-sm">{alert.title}</span>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wide ${alert.type === 'geofence'
                               ? 'bg-red-50 text-red-700 border-red-200'
                               : 'bg-indigo-50 text-indigo-700 border-indigo-200'
                             }`}>
-                            {alert.type === 'geofence' ? 'Geofence Breach' : 'Punch Alert'}
+                            {ALERT_LABELS[alert.type].badge}
                           </span>
                         </div>
                         <span className="text-[11px] text-slate-400 font-medium shrink-0">
@@ -742,30 +790,22 @@ export function NotificationPanel({
                         </span>
                       </div>
 
-                      <p className="text-xs text-slate-600 mt-1 leading-snug">
-                        <span className="font-semibold text-slate-800">{alert.title}</span> • {alert.description}
-                      </p>
-
-                      {alert.location && (
-                        <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">
-                          <span className="material-symbols-outlined text-[13px]">pin_drop</span>
-                          <span>{alert.location}</span>
-                        </div>
-                      )}
+                      <p className="text-xs text-slate-600 mt-1 leading-snug">{alert.description}</p>
 
                       {/* Action Buttons */}
                       <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-slate-100 flex-wrap">
                         <button
-                          onClick={() => handleNavigate('attendance')}
+                          onClick={() => handleNavigate(alert.tab)}
                           className="bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
                           type="button"
                         >
                           <span className="material-symbols-outlined text-[14px] text-indigo-600">policy</span>
-                          Review Attendance Log
+                          {alert.tab === 'office-geofence' ? 'Open Office Geofence' : ALERT_LABELS[alert.type].action}
                         </button>
                         <button
                           onClick={() => handleAcknowledgeAlert(alert.id)}
-                          className="bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
+                          disabled={updatingId === alert.id}
+                          className="bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                           type="button"
                         >
                           Acknowledge
@@ -778,7 +818,7 @@ export function NotificationPanel({
           </div>
 
           {/* Panel Footer */}
-          <div className="p-3.5 px-5 bg-white border-t border-slate-100 flex items-center justify-between">
+          <div className="p-3.5 px-5 bg-white/50 border-t border-slate-100 flex items-center justify-between">
             <button
               onClick={handleMarkAllRead}
               className="text-primary hover:text-secondary text-xs font-semibold transition-colors cursor-pointer"

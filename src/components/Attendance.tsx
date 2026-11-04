@@ -13,6 +13,7 @@ import {
 import { generateAttendancePdf } from '../lib/attendancePdf'
 import { EmployeeAttendanceHistory } from './EmployeeAttendanceHistory'
 import { EmptyState } from './EmptyState'
+import { SkeletonTableRows } from './Skeleton'
 
 export function Attendance() {
   const { token, logout } = useAuth()
@@ -347,7 +348,7 @@ export function Attendance() {
   }
 
   return (
-    <main className="relative min-h-screen bg-[#faf9fd] w-full px-4 sm:px-8 py-7 pt-24">
+    <main className="relative min-h-screen w-full px-4 sm:px-8 py-7 pt-24">
       {downloadToast && selectedRecord && (
         <div className="fixed top-24 right-8 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-slate-700 animate-in fade-in slide-in-from-top-2">
           <span className="material-symbols-outlined text-emerald-400 text-[20px]">
@@ -451,7 +452,7 @@ export function Attendance() {
         )}
 
         {/* Controls / Search & Filters Card */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
+        <div className="glass-panel border border-slate-200/70 rounded-2xl p-4 shadow-sm flex flex-col gap-4">
           <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3">
             {/* Search */}
             <div className="relative flex-1 max-w-xl">
@@ -716,9 +717,9 @@ export function Attendance() {
         {/* 2-Column Section: Attendance Table + Contextual Right Audit Drawer */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
           {/* Attendance Table (col-span-8) */}
-          <div className="xl:col-span-8 bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+          <div className="xl:col-span-8 flex flex-col">
             {/* Table Header Bar */}
-            <div className="px-6 py-4 bg-slate-50/70 border-b border-slate-200/80 flex items-center justify-between">
+            <div className="px-1 pb-1 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <span className="font-bold text-slate-900 text-sm">Daily Punch Log</span>
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
@@ -732,10 +733,10 @@ export function Attendance() {
             </div>
 
             {/* Table Body */}
-            <div className="overflow-x-auto w-full">
-              <table className="w-full text-left border-collapse">
+            <div className="overflow-x-auto w-full -mx-2 px-2">
+              <table className="item-list item-list-zoom w-full text-left">
                 <thead>
-                  <tr className="border-b border-slate-200/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-white">
+                  <tr className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                     <th className="py-3 px-6">EMPLOYEE</th>
                     <th className="py-3 px-4">ID</th>
                     <th className="py-3 px-4">DATE</th>
@@ -745,16 +746,9 @@ export function Attendance() {
                     <th className="py-3 px-4 text-right">ACTION</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-xs">
+                <tbody className="text-xs">
                   {isLoading ? (
-                    <tr>
-                      <td colSpan={7} className="py-12 text-center text-slate-400 font-medium text-xs">
-                        <div className="flex flex-col items-center justify-center gap-3">
-                          <span className="w-6 h-6 rounded-full bg-red-500 animate-ping"></span>
-                          <p className="text-slate-500 font-semibold">Loading daily attendance records...</p>
-                        </div>
-                      </td>
-                    </tr>
+                    <SkeletonTableRows columns={7} />
                   ) : filteredRecords.length === 0 ? (
                     <tr>
                       <td colSpan={7}>
@@ -908,7 +902,7 @@ export function Attendance() {
             </div>
 
             {/* Pagination Footer */}
-            <div className="px-6 py-4 bg-white border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="px-1 pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
               <span className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
                 SHOWING 1-{filteredRecords.length} OF {counts.all} RECORDS
               </span>
@@ -918,7 +912,7 @@ export function Attendance() {
           {/* Right Focused Employee Audit Card (col-span-4) */}
           <div className="xl:col-span-4 flex flex-col gap-4 sticky top-24">
             {selectedRecord ? (
-              <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+              <div className="glass-panel border border-slate-200/70 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
                 {/* Header */}
                 <div className="flex items-start justify-between pb-1 border-b border-slate-100">
                   <div className="flex flex-col">
@@ -1267,7 +1261,7 @@ export function Attendance() {
                 </div>
               </div>
             ) : (
-              <div className="bg-white border border-slate-200/80 rounded-2xl p-8 shadow-sm text-center text-slate-400 text-xs">
+              <div className="glass-panel border border-slate-200/70 rounded-2xl p-8 shadow-sm text-center text-slate-400 text-xs">
                 Select an employee from the table to view their attendance history.
               </div>
             )}

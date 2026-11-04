@@ -92,7 +92,7 @@ export function EmployeeProfile() {
       )}
 
       {/* Main Profile Header Card */}
-      <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200/80 relative overflow-hidden">
+      <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-xs border border-slate-200/70 relative overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
           <div className="flex items-center gap-4 sm:gap-6">
             {/* Avatar */}
@@ -136,7 +136,7 @@ export function EmployeeProfile() {
       {/* Profile Details Bento Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Card 1: Employment Details */}
-        <div className="glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/80 space-y-4">
+        <div className="glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/70 space-y-4">
           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-2 pb-3 border-b border-slate-100">
             <Briefcase className="w-4 h-4 text-red-500" />
             <span>Employment Record</span>
@@ -174,7 +174,7 @@ export function EmployeeProfile() {
         </div>
 
         {/* Card 2: Contact & Account Information */}
-        <div className="glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/80 space-y-4">
+        <div className="glass-card rounded-3xl p-6 sm:p-7 shadow-xs border border-slate-200/70 space-y-4">
           <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 flex items-center gap-2 pb-3 border-b border-slate-100">
             <Mail className="w-4 h-4 text-red-500" />
             <span>Contact &amp; Credentials</span>

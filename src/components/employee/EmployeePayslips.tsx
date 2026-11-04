@@ -3,6 +3,7 @@ import { FileText, Download, Loader2, Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import { getMyPayslips, getMyPayslip, formatRupees, type PayslipListItem } from '../../lib/api'
 import { downloadPayslipPdf } from '../../lib/payslipPdf'
+import { SkeletonCards } from '../Skeleton'
 
 function monthLabel(month: string): string {
   return new Date(`${month}-01T12:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
@@ -47,7 +48,7 @@ export function EmployeePayslips() {
   }
 
   return (
-    <section className="rounded-3xl bg-white border border-slate-200/80 shadow-sm p-5 sm:p-6 flex flex-col gap-4">
+    <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center">
@@ -70,15 +71,13 @@ export function EmployeePayslips() {
       {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</p>}
 
       {isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading payslips…
-        </div>
+        <SkeletonCards count={2} />
       ) : payslips.length === 0 ? (
         <p className="text-sm text-slate-500">No payslips yet. They appear here after payroll for a month is locked.</p>
       ) : (
-        <ul className="flex flex-col divide-y divide-slate-100">
+        <ul className="flex flex-col gap-2">
           {payslips.map((p) => (
-            <li key={p.payslipNumber} className="flex items-center justify-between gap-3 py-3">
+            <li key={p.payslipNumber} className="glass-panel rounded-2xl border border-slate-200/70 flex items-center justify-between gap-3 px-4 py-3">
               <div className="flex flex-col">
                 <span className="text-sm font-semibold text-slate-800">{monthLabel(p.month)}</span>
                 <span className="text-[11.5px] text-slate-400">

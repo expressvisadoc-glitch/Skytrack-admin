@@ -11,6 +11,7 @@ import {
 import { currentUtcMonth, salaryStatusMessage } from '../lib/salary'
 import { SalaryBreakdown } from './SalaryBreakdown'
 import { EmptyState } from './EmptyState'
+import { SkeletonLines } from './Skeleton'
 
 const MAX_MONTHLY_GROSS = 10000000
 
@@ -118,7 +119,7 @@ export function EmployeeSalarySection({ employeeId, employeeName }: EmployeeSala
   const statusMessage = currentMonth ? salaryStatusMessage(currentMonth) : null
 
   return (
-    <div className="w-full rounded-2xl bg-white border border-slate-200/80 shadow-sm p-6">
+    <div className="w-full rounded-2xl glass-panel border border-slate-200/70 shadow-sm p-6">
       {/* Confirm modal */}
       {isConfirming && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
@@ -201,7 +202,7 @@ export function EmployeeSalarySection({ employeeId, employeeName }: EmployeeSala
       )}
 
       {isLoading ? (
-        <p className="text-sm text-slate-400">Loading salary…</p>
+        <SkeletonLines lines={3} />
       ) : loadError ? (
         <div className="flex items-center justify-between gap-3 text-sm text-red-700">
           <span>{loadError}</span>
@@ -249,7 +250,7 @@ export function EmployeeSalarySection({ employeeId, employeeName }: EmployeeSala
               <EmptyState compact icon="payments" title="No salary set yet" description="Use Change Salary to set this employee's monthly gross." />
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-xs">
+                <table className="item-list w-full text-xs">
                   <thead>
                     <tr className="text-left text-slate-400 uppercase tracking-wide">
                       <th className="py-2 pr-3 font-bold">From</th>
@@ -260,7 +261,7 @@ export function EmployeeSalarySection({ employeeId, employeeName }: EmployeeSala
                   </thead>
                   <tbody>
                     {history.map((h) => (
-                      <tr key={h.id} className="border-t border-slate-100 text-slate-700" title={`Saved ${formatDateTime(h.createdAt)}`}>
+                      <tr key={h.id} className="text-slate-700" title={`Saved ${formatDateTime(h.createdAt)}`}>
                         <td className="py-2 pr-3 whitespace-nowrap">{formatDate(h.effectiveFrom)}</td>
                         <td className="py-2 pr-3 whitespace-nowrap font-semibold">{formatRupees(h.monthlyGross, true)}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{h.createdBy?.name || '—'}</td>

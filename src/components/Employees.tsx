@@ -6,6 +6,12 @@ import {
   type EmployeeDirectoryItem,
 } from '../lib/api'
 import { EmployeeDetails } from './EmployeeDetails'
+import { SkeletonTableRows, SkeletonValue } from './Skeleton'
+
+function readEmployeeLink(): { emp: string | null; section: string | null } {
+  const params = new URLSearchParams(window.location.search)
+  return { emp: params.get('emp'), section: params.get('section') }
+}
 
 export function Employees() {
   const { token, logout } = useAuth()
@@ -15,6 +21,8 @@ export function Employees() {
   const [searchQuery, setSearchQuery] = useState('')
   const [currentFilter, setCurrentFilter] = useState<'all' | 'present' | 'on_break' | 'leave' | 'absent'>('all')
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDirectoryItem | null>(null)
+  // Employee opened from another screen via /employees?emp=SKY001[&section=salary] (lib/navigation.ts)
+  const [linked, setLinked] = useState(readEmployeeLink)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Add Employee State
@@ -114,6 +122,31 @@ export function Employees() {
     loadEmployees()
   }, [loadEmployees])
 
+  // Browser Back/Forward and shortcut arrows change ?emp= while this screen is open
+  useEffect(() => {
+    const onPopState = () => {
+      setLinked(readEmployeeLink())
+      setSelectedEmployee(null)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  const linkedEmployee = useMemo(() => {
+    const wanted = linked.emp?.toLowerCase()
+    if (!wanted) return null
+    return employees.find((e) => [e.employee_id, e.code, e.id].some((v) => v && v.toLowerCase() === wanted)) ?? null
+  }, [linked.emp, employees])
+  const shownEmployee = selectedEmployee ?? linkedEmployee
+
+  const closeEmployee = () => {
+    setSelectedEmployee(null)
+    if (linked.emp) {
+      setLinked({ emp: null, section: null })
+      window.history.pushState(null, '', window.location.pathname)
+    }
+  }
+
   // Keyboard shortcut listener (CMD+K / CTRL+K)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -163,14 +196,16 @@ export function Employees() {
 
   const handleEmployeeDeleted = (deletedId: string) => {
     setEmployees((prev) => prev.filter((e) => e.id !== deletedId))
-    setSelectedEmployee(null)
+    closeEmployee()
   }
 
-  if (selectedEmployee) {
+  if (shownEmployee) {
     return (
       <EmployeeDetails
-        employee={selectedEmployee}
-        onBack={() => setSelectedEmployee(null)}
+        key={shownEmployee.id}
+        employee={shownEmployee}
+        focusSection={selectedEmployee ? null : linked.section}
+        onBack={closeEmployee}
         onEmployeeUpdated={handleEmployeeUpdated}
         onEmployeeDeleted={handleEmployeeDeleted}
       />
@@ -179,7 +214,7 @@ export function Employees() {
 
 
   return (
-    <main className="w-full pt-20 px-4 sm:px-8 bg-background pb-14 min-h-[calc(100vh-4rem)]">
+    <main className="w-full pt-20 px-4 sm:px-8 pb-14 min-h-[calc(100vh-4rem)]">
       <div className="flex flex-col w-full max-w-7xl mx-auto gap-6">
         {/* Top Header / Title Row */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pt-4">
@@ -209,12 +244,8 @@ export function Employees() {
             <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200/80 shadow-xs">
               <span className="w-2 h-2 rounded-full bg-red-600"></span>
               <span className="text-xs font-bold text-slate-800">
-                {isLoading ? '...' : `${counts.all} Enrolled`}
+                {isLoading ? <SkeletonValue className="h-3.5 w-16" /> : `${counts.all} Enrolled`}
               </span>
-            </div>
-            <div className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 shadow-xs">
-              <span className="material-symbols-outlined text-sm text-emerald-600">verified_user</span>
-              <span className="text-xs font-bold">Bio-Sync Active</span>
             </div>
           </div>
         </div>
@@ -245,18 +276,16 @@ export function Employees() {
             <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0">
               <button
                 onClick={() => setCurrentFilter('all')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${
-                  currentFilter === 'all'
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${currentFilter === 'all'
                     ? 'font-semibold bg-red-600 text-white shadow-sm shadow-red-600/20'
                     : 'font-medium bg-slate-100/90 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900 border border-slate-200/60'
-                }`}
+                  }`}
                 type="button"
               >
                 <span>All</span>
                 <span
-                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${
-                    currentFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                  }`}
+                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${currentFilter === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
                 >
                   {counts.all}
                 </span>
@@ -264,19 +293,17 @@ export function Employees() {
 
               <button
                 onClick={() => setCurrentFilter('present')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${
-                  currentFilter === 'present'
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${currentFilter === 'present'
                     ? 'font-semibold bg-red-600 text-white shadow-sm shadow-red-600/20'
                     : 'font-medium bg-slate-100/90 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900 border border-slate-200/60'
-                }`}
+                  }`}
                 type="button"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                 <span>Present Today</span>
                 <span
-                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${
-                    currentFilter === 'present' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                  }`}
+                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${currentFilter === 'present' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
                 >
                   {counts.present}
                 </span>
@@ -284,19 +311,17 @@ export function Employees() {
 
               <button
                 onClick={() => setCurrentFilter('on_break')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${
-                  currentFilter === 'on_break'
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${currentFilter === 'on_break'
                     ? 'font-semibold bg-red-600 text-white shadow-sm shadow-red-600/20'
                     : 'font-medium bg-slate-100/90 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900 border border-slate-200/60'
-                }`}
+                  }`}
                 type="button"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
                 <span>On Break</span>
                 <span
-                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${
-                    currentFilter === 'on_break' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                  }`}
+                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${currentFilter === 'on_break' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
                 >
                   {counts.onBreak}
                 </span>
@@ -304,19 +329,17 @@ export function Employees() {
 
               <button
                 onClick={() => setCurrentFilter('leave')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${
-                  currentFilter === 'leave'
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${currentFilter === 'leave'
                     ? 'font-semibold bg-red-600 text-white shadow-sm shadow-red-600/20'
                     : 'font-medium bg-slate-100/90 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900 border border-slate-200/60'
-                }`}
+                  }`}
                 type="button"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
                 <span>On Leave</span>
                 <span
-                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${
-                    currentFilter === 'leave' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                  }`}
+                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${currentFilter === 'leave' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
                 >
                   {counts.leave}
                 </span>
@@ -324,19 +347,17 @@ export function Employees() {
 
               <button
                 onClick={() => setCurrentFilter('absent')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${
-                  currentFilter === 'absent'
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer ${currentFilter === 'absent'
                     ? 'font-semibold bg-red-600 text-white shadow-sm shadow-red-600/20'
                     : 'font-medium bg-slate-100/90 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900 border border-slate-200/60'
-                }`}
+                  }`}
                 type="button"
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
                 <span>Absent</span>
                 <span
-                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${
-                    currentFilter === 'absent' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-                  }`}
+                  className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${currentFilter === 'absent' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
                 >
                   {counts.absent}
                 </span>
@@ -383,11 +404,11 @@ export function Employees() {
         )}
 
         {/* Employees Table Card */}
-        <div className="w-full bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto w-full">
-            <table className="w-full text-left border-collapse">
+        <div className="w-full">
+          <div className="overflow-x-auto w-full -mx-2 px-2">
+            <table className="item-list item-list-zoom w-full text-left">
               <thead>
-                <tr className="bg-slate-50/90 border-b border-slate-200/80 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
+                <tr className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">
                   <th className="py-3.5 px-6" scope="col">Employee</th>
                   <th className="py-3.5 px-4" scope="col">Employee ID</th>
                   <th className="py-3.5 px-4" scope="col">Attendance Today</th>
@@ -396,16 +417,9 @@ export function Employees() {
                   <th className="py-3.5 px-6 text-right" scope="col">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="">
                 {isLoading ? (
-                  <tr>
-                    <td colSpan={6} className="py-12 text-center text-xs text-slate-400 font-medium">
-                      <div className="flex flex-col items-center justify-center gap-3">
-                        <span className="w-6 h-6 rounded-full bg-red-500 animate-ping"></span>
-                        <p className="text-slate-500 font-semibold">Loading workforce registry...</p>
-                      </div>
-                    </td>
-                  </tr>
+                  <SkeletonTableRows columns={6} />
                 ) : filteredEmployees.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="py-12 text-center">
@@ -449,9 +463,8 @@ export function Employees() {
                             </div>
                           ) : (
                             <div
-                              className={`w-10 h-10 rounded-xl border flex items-center justify-center font-bold text-xs ${
-                                emp.initialsBg || 'bg-slate-100'
-                              } ${emp.initialsColor || 'text-slate-700 border-slate-200'}`}
+                              className={`w-10 h-10 rounded-xl border flex items-center justify-center font-bold text-xs ${emp.initialsBg || 'bg-slate-100'
+                                } ${emp.initialsColor || 'text-slate-700 border-slate-200'}`}
                             >
                               {emp.initials}
                             </div>
@@ -615,7 +628,7 @@ export function Employees() {
       {/* Add Employee Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-          <div className="glass-card rounded-3xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-5 border border-white bg-white">
+          <div className="rounded-3xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-5 border border-white bg-white">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
