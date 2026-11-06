@@ -616,6 +616,10 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleSuperAdminChangeEmployeePassword(employee, body, user);
     }
 
+    if (action === "change_own_password") {
+      return await handleChangeOwnPassword(employee, body, user);
+    }
+
     if (action === "update_profile_photo") {
       return await handleUpdateProfilePhoto(employee, body);
     }
@@ -6360,6 +6364,102 @@ function calculateHours(
 // =============================================================
 // PROFILE PHOTO MANAGEMENT
 // =============================================================
+
+// Any signed-in employee changes their own password: the current password is checked first, and the new one must
+// meet the same rules the app shows (8+ characters, upper and lower case, a digit and a symbol).
+async function handleChangeOwnPassword(employee: any, body: any, authUser?: any) {
+  try {
+    const currentPassword = String(body.currentPassword ?? body.current_password ?? "");
+    const newPassword = String(body.newPassword ?? body.new_password ?? "");
+
+    if (!currentPassword || !newPassword) {
+      return json({
+        success: false,
+        error: "missing_password",
+        message: "Enter your current password and a new password."
+      }, 400);
+    }
+
+    const meetsPolicy =
+      newPassword.length >= 8 &&
+      newPassword.length <= 72 &&
+      /[a-z]/.test(newPassword) &&
+      /[A-Z]/.test(newPassword) &&
+      /\d/.test(newPassword) &&
+      /[^A-Za-z0-9]/.test(newPassword);
+    if (!meetsPolicy) {
+      return json({
+        success: false,
+        error: "weak_password",
+        message: "Use at least 8 characters with upper and lower case letters, a number and a symbol."
+      }, 400);
+    }
+
+    if (newPassword === currentPassword) {
+      return json({
+        success: false,
+        error: "same_password",
+        message: "The new password must be different from your current password."
+      }, 400);
+    }
+
+    const email = String(employee?.email || authUser?.email || "").trim().toLowerCase();
+    const authUserId = employee?.auth_user_id || authUser?.id;
+    if (!email || !authUserId) {
+      return json({
+        success: false,
+        error: "account_not_configured",
+        message: "Your sign-in account is not set up. Please contact your admin."
+      }, 400);
+    }
+
+    // 400 (not 401) so the app does not read a wrong current password as an expired session
+    const { data: verified, error: verifyError } = await authClient.auth.signInWithPassword({
+      email,
+      password: currentPassword
+    });
+    if (verifyError || !verified?.user || verified.user.id !== authUserId) {
+      return json({
+        success: false,
+        error: "wrong_current_password",
+        message: "Your current password is incorrect."
+      }, 400);
+    }
+
+    const { error: updateError } = await adminClient.auth.admin.updateUserById(authUserId, {
+      password: newPassword
+    });
+    if (updateError) {
+      console.error("Change own password failed:", updateError.message);
+      return json({
+        success: false,
+        error: "password_update_failed",
+        message: "Your password could not be changed. Please try again."
+      }, 500);
+    }
+
+    await createNotification(
+      employee.id,
+      "password_changed",
+      "Password changed",
+      "Your SkyTrack password was changed. If this was not you, contact HR immediately.",
+      { screen: "profile" },
+      `PW:${employee.id}:${Date.now()}`
+    );
+
+    return json({
+      success: true,
+      message: "Your password has been changed."
+    });
+  } catch (error) {
+    console.error("Change own password error:", error);
+    return json({
+      success: false,
+      error: "change_password_failed",
+      message: "Your password could not be changed. Please try again."
+    }, 500);
+  }
+}
 
 async function handleUpdateProfilePhoto(employee: any, body: any) {
   try {

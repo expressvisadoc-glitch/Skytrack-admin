@@ -272,6 +272,7 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 | `save_public_holiday` | Admin | Creates or updates public holiday details and branch assignments using service role. |
 | `seed_public_holidays` | Admin | Populates default statutory Indian & Kerala public holidays into the database. |
 | `super_admin_change_employee_password` | Super Admin | Resets employee password in Supabase Auth via Admin Auth API. |
+| `change_own_password` | Any signed-in employee | Changes the caller's own password after checking the current one (8+ chars, upper and lower case, digit, symbol). Ends all sessions of the account; the Android app signs in again with the new password. Sends a `password_changed` notification. |
 | `admin_geofence_settings` | Admin | Returns office geofence settings, last-changed-by and recent change history. |
 | `admin_save_geofence_settings` | Admin | Validates and saves office location, radius, active flag and accuracy policy. |
 | `salary_summary` | Authenticated | Employee's own provisional salary for a month (`month` = `YYYY-MM`, default current). |
