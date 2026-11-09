@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Side menu width on desktop; `sidebar-collapsed` on <html> (lib/sidebar.ts) shows icons only */
+:root {
+  --sidebar-w: 18rem;
+}
+:root.sidebar-collapsed {
+  --sidebar-w: 5.5rem;
+}
+
 /* Dark theme follows the `dark` class on <html> (lib/theme.ts), not the OS setting */
 @custom-variant dark (&:where(.dark, .dark *));
 

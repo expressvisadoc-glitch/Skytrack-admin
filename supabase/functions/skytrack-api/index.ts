@@ -443,6 +443,10 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleGeofenceConfig();
     }
 
+    if (action === "admin_resolve_map_link") {
+      return await handleAdminResolveMapLink(employee, body);
+    }
+
     if (action === "admin_geofence_settings") {
       return await handleAdminGeofenceSettings(employee);
     }
@@ -527,7 +531,7 @@ async function handleRequest(req: Request): Promise<Response> {
     }
 
     if (action === "leave_balance") {
-      return await handleLeaveBalance(employee);
+      return await handleLeaveBalance(employee, body);
     }
 
     if (action === "leave_submit") {
@@ -1742,6 +1746,127 @@ function geofenceForbiddenResponse(): Response {
 function isAdminRole(employee: any): boolean {
   const role = String(employee?.role || "").toLowerCase();
   return role === "admin" || role === "super_admin";
+}
+
+// -------------------------------------------------------------
+// Office location from a Google Maps / Apple Maps link
+// -------------------------------------------------------------
+// Short share links (maps.app.goo.gl, maps.apple/p/...) hide the coordinates behind redirects that a browser
+// cannot follow. Only Google and Apple map hosts are ever requested, at every redirect hop, so this cannot be
+// used to reach other servers. The same parsing rules are used in the web portal (src/lib/mapLink.ts).
+const MAP_LINK_HOST = /^(maps\.app\.goo\.gl|goo\.gl|g\.co|maps\.apple|maps\.apple\.com|apple\.co|consent\.google\.[a-z.]+|(?:www\.|maps\.)?google\.[a-z]{2,3}(?:\.[a-z]{2})?)$/i;
+
+function validMapPair(lat: number, lng: number): boolean {
+  return Number.isFinite(lat) && Number.isFinite(lng) &&
+    lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && !(lat === 0 && lng === 0);
+}
+
+function mapPair(text: string): { latitude: number; longitude: number } | null {
+  const m = /^\s*([-+]?\d{1,3}(?:\.\d+)?)\s*[,\s]\s*([-+]?\d{1,3}(?:\.\d+)?)\s*$/.exec(text);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  return validMapPair(lat, lng) ? { latitude: lat, longitude: lng } : null;
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function mapUrlCoordinates(url: URL): { latitude: number; longitude: number } | null {
+  const full = safeDecode(url.href);
+  const pin = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/.exec(full);
+  if (pin && validMapPair(Number(pin[1]), Number(pin[2]))) return { latitude: Number(pin[1]), longitude: Number(pin[2]) };
+  for (const key of ["coordinate", "q", "query", "ll", "center", "destination", "daddr", "sll"]) {
+    const value = url.searchParams.get(key);
+    if (value) {
+      const pair = mapPair(value.replace(/^loc:/i, ""));
+      if (pair) return pair;
+    }
+  }
+  const path = safeDecode(url.pathname).replace(/\+/g, " ");
+  const inPath = /\/(?:search|place|dir)\/(?:[^/]*\/)*?\s*([-+]?\d{1,3}\.\d+)\s*,\s*([-+]?\d{1,3}\.\d+)/.exec(path);
+  if (inPath && validMapPair(Number(inPath[1]), Number(inPath[2]))) return { latitude: Number(inPath[1]), longitude: Number(inPath[2]) };
+  const at = /@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/.exec(full);
+  if (at && validMapPair(Number(at[1]), Number(at[2]))) return { latitude: Number(at[1]), longitude: Number(at[2]) };
+  return null;
+}
+
+function mapPlaceName(url: URL): string | null {
+  const google = /\/maps\/place\/([^/@]+)/.exec(url.pathname);
+  const raw = google ? google[1] : url.searchParams.get("name") ?? url.searchParams.get("q");
+  if (!raw) return null;
+  const name = safeDecode(raw.replace(/\+/g, " ")).trim();
+  return name && !mapPair(name) && name.length <= 120 ? name : null;
+}
+
+async function handleAdminResolveMapLink(employee: any, body: any): Promise<Response> {
+  if (!isAdminRole(employee)) {
+    return json({ success: false, error: "forbidden", message: "Only admins can set the office location." }, 403);
+  }
+  const raw = String(body.url ?? "").trim();
+  const notFound = json({
+    success: false,
+    error: "location_not_found",
+    message: "That link names a place but has no coordinates. In Google Maps or Apple Maps, drop a pin on the office (long-press the map) and share that pin, or copy its coordinates.",
+  }, 422);
+  let current: URL;
+  try {
+    current = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+  } catch {
+    return json({ success: false, error: "invalid_link", message: "That link could not be read." }, 400);
+  }
+  if (!raw || raw.length > 2048) {
+    return json({ success: false, error: "invalid_link", message: "That link could not be read." }, 400);
+  }
+
+  let placeName: string | null = null;
+  for (let hop = 0; hop < 6; hop++) {
+    if (current.protocol !== "https:" || !MAP_LINK_HOST.test(current.hostname)) {
+      return json({ success: false, error: "unsupported_link", message: "Only Google Maps and Apple Maps links are supported." }, 400);
+    }
+    // Google's cookie consent page carries the real address in ?continue=
+    if (/^consent\.google\./i.test(current.hostname)) {
+      const next = current.searchParams.get("continue");
+      if (!next) return notFound;
+      try {
+        current = new URL(next);
+      } catch {
+        return notFound;
+      }
+      continue;
+    }
+    placeName = mapPlaceName(current) ?? placeName;
+    const coordinates = mapUrlCoordinates(current);
+    if (coordinates) return json({ success: true, ...coordinates, placeName });
+
+    let response: Response;
+    try {
+      response = await fetch(current.href, {
+        redirect: "manual",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; SkyTrack/1.0)", "Accept-Language": "en" },
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (error) {
+      console.error("admin_resolve_map_link fetch failed:", error instanceof Error ? error.message : error);
+      return json({ success: false, error: "link_unreachable", message: "That link could not be opened. Please try again." }, 502);
+    }
+    const location = response.headers.get("location");
+    if (response.status >= 300 && response.status < 400 && location) {
+      await response.body?.cancel();
+      current = new URL(location, current);
+      continue;
+    }
+    // Coordinates are only taken from the link and its redirects. The page itself is never read: Google fills it
+    // with a view guessed from the visitor's network location, which would put the office in the wrong city.
+    await response.body?.cancel();
+    return notFound;
+  }
+  return notFound;
 }
 
 async function handleAdminGeofenceSettings(employee: any): Promise<Response> {
@@ -4456,8 +4581,33 @@ async function handleCancelLeave(
 // =============================================================
 
 async function handleLeaveBalance(
-  employee: any
+  caller: any,
+  body: any = {}
 ) {
+  // Admins can read any employee's balance (employeeId = row id or employee code); everyone else reads their own.
+  // Without this the admin portal showed the admin's own balance for every employee, so leave adjustments
+  // looked like they had not been saved.
+  let employee = caller;
+  const requestedId = String(body?.employeeId ?? body?.employee_id ?? "").trim();
+  if (requestedId && requestedId !== caller.id && requestedId.toLowerCase() !== String(caller.employee_id ?? "").toLowerCase()) {
+    if (!isAdminRole(caller)) {
+      return json({ success: false, error: "forbidden", message: "You can only view your own leave balance." }, 403);
+    }
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestedId);
+    const { data: target, error: targetError } = await adminClient
+      .from("employees")
+      .select("id, employee_id, reporting_manager_id")
+      .eq(isUuid ? "id" : "employee_id", requestedId)
+      .maybeSingle();
+    if (targetError) {
+      return json({ success: false, error: "leave_balance_error", message: "Unable to load leave balance." }, 500);
+    }
+    if (!target) {
+      return json({ success: false, error: "employee_not_found", message: "Employee not found." }, 404);
+    }
+    employee = target;
+  }
+
   const {
     data,
     error

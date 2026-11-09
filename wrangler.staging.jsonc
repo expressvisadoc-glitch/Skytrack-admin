@@ -1,0 +1,23 @@
+// TESTING site only: a separate Cloudflare Worker ("skytrack-admin-staging") that talks to the STAGING Supabase
+// project. It never replaces the live "skytrack-admin" worker (wrangler.jsonc, built by Cloudflare from main).
+// Build:  npx vite build --mode staging      (uses the git-ignored .env.staging.local)
+// Deploy: npx wrangler deploy -c wrangler.staging.jsonc
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "skytrack-admin-staging",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-10-06",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "SKYTRACK_API_TARGET": "https://npwwwapbbvkvteycxaab.supabase.co/functions/v1/skytrack-api"
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

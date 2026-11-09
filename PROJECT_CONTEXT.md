@@ -273,6 +273,7 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 | `seed_public_holidays` | Admin | Populates default statutory Indian & Kerala public holidays into the database. |
 | `super_admin_change_employee_password` | Super Admin | Resets employee password in Supabase Auth via Admin Auth API. |
 | `change_own_password` | Any signed-in employee | Changes the caller's own password after checking the current one (8+ chars, upper and lower case, digit, symbol). Ends all sessions of the account; the Android app signs in again with the new password. Sends a `password_changed` notification. |
+| `admin_resolve_map_link` | Admin | Office Geofence: reads the coordinates behind a Google Maps / Apple Maps share link (short links such as `maps.app.goo.gl` need a server). Only Google and Apple map hosts are requested at every redirect; coordinates are taken from the link and its redirects only, never from the page (Google fills the page with a view guessed from the visitor's network). The portal reads full links and plain coordinates itself (`src/lib/mapLink.ts`). |
 | `admin_geofence_settings` | Admin | Returns office geofence settings, last-changed-by and recent change history. |
 | `admin_save_geofence_settings` | Admin | Validates and saves office location, radius, active flag and accuracy policy. |
 | `salary_summary` | Authenticated | Employee's own provisional salary for a month (`month` = `YYYY-MM`, default current). |
@@ -462,7 +463,8 @@ Local files (all outside git): `/Volumes/Excelsior/SkyTrack/skytrack-staging.env
    to every employee.
 5. **Do not install a `debug` or `release` build of the feature branch on any phone.** Those variants use the
    production API and the production application id (they replace the real app). Use only the `staging` variant.
-6. **Do not use a Cloudflare preview deploy** for testing: `worker.ts` proxies `/api/skytrack` to production.
+6. **Do not use a Cloudflare preview deploy** of the live worker for testing: its `/api/skytrack` proxy goes to
+   production. Use the separate testing worker instead (§7.3.1).
 7. **Never commit staging secrets** (`skytrack-staging.env`, `.env.staging.local`, test passwords). Revoke the
    personal access token after testing.
 8. **Production is read-only during testing.** The Supabase pooler ignores `PGOPTIONS=-c default_transaction_read_only=on`;
@@ -549,6 +551,19 @@ laptop either raise Max accuracy to ~200 m and Radius to ≥150 m in staging, or
 **Sensors** → Location with an Accuracy value (if your Chrome version shows that field). An office pin captured
 with "Use my current location" on a laptop inherits that ±140 m error — re-enter the real coordinates (Google Maps
 → long-press the office) before testing on a phone.
+
+### 7.3.1. Published testing website (Cloudflare, separate from live)
+
+`https://skytrack-admin-staging.amalramachandran25.workers.dev` is a separate Cloudflare Worker,
+`skytrack-admin-staging`, on the amalramachandran25@gmail.com Cloudflare account (the live site is on another
+account). It talks only to staging: `wrangler.staging.jsonc` sets `SKYTRACK_API_TARGET` for the `/api/skytrack`
+proxy in `worker.ts`; the live worker does not set it and keeps using production. To update it from `feature/payroll`:
+
+```bash
+npx vite build --mode staging                 # uses the git-ignored .env.staging.local
+grep -l cwtrrtbodqctntkpnjlv dist/assets/*.js # must print nothing (no production reference)
+npx wrangler deploy -c wrangler.staging.jsonc # never plain `wrangler deploy` (that is the live config)
+```
 
 ### 7.4. Run the Android app against staging (physical phone or emulator)
 Build the staging APK from the feature branch (stash any local WIP on `development` first, restore it after):
