@@ -28,7 +28,7 @@ export function EmployeeHeader({
   })
 
   return (
-    <header className="fixed top-0 lg:left-72 left-0 right-0 h-20 bg-white/75 backdrop-blur-xl border-b border-slate-200/70 z-40 flex items-center justify-between px-4 lg:px-8 transition-all">
+    <header className="fixed top-0 lg:left-[var(--sidebar-w)] left-0 right-0 h-20 bg-white/75 backdrop-blur-xl border-b border-slate-200/70 z-40 flex items-center justify-between px-4 lg:px-8 transition-all">
       {/* Brand & Mobile Menu */}
       <div className="flex items-center gap-4 lg:gap-6 w-full max-w-xl">
         {onToggleSidebar && (

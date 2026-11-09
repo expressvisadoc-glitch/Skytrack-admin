@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import {
   getGeofenceSettings,
+  resolveMapLink,
   saveGeofenceSettings,
   type GeofenceSettings,
   type GeofenceHistoryEntry,
   type GeofenceSettingsInput,
 } from '../lib/api'
 import { distanceMeters, getBrowserLocation } from '../lib/geolocation'
+import { parseMapLocation, sourceLabel, type MapSource } from '../lib/mapLink'
 import { GeofenceMap, type UserFix } from './GeofenceMap'
 import { SkeletonPage } from './Skeleton'
 
@@ -159,6 +161,11 @@ export function OfficeGeofence() {
   const [userFix, setUserFix] = useState<UserFix | null>(null)
   const [isLocatingUser, setIsLocatingUser] = useState(false)
   const [userLocateError, setUserLocateError] = useState('')
+  // "Map link or coordinates" box
+  const [mapLink, setMapLink] = useState('')
+  const [isResolvingLink, setIsResolvingLink] = useState(false)
+  const [linkError, setLinkError] = useState('')
+  const [linkNote, setLinkNote] = useState('')
 
   const locateUser = useCallback(async () => {
     setIsLocatingUser(true)
@@ -228,7 +235,51 @@ export function OfficeGeofence() {
     return () => clearTimeout(timer)
   }, [form.latitude, form.longitude, form.radiusMeters])
 
+  /** Fills the coordinates (and an empty office name) from a pasted map link or coordinates */
+  const applyMapLink = async (text: string) => {
+    setLinkError('')
+    setLinkNote('')
+    const parsed = parseMapLocation(text)
+    if (parsed.kind === 'invalid') {
+      setLinkError(parsed.message)
+      return
+    }
+    let found: { latitude: number; longitude: number; source: MapSource; placeName?: string | null }
+    if (parsed.kind === 'found') {
+      found = parsed
+    } else {
+      if (!token) return
+      setIsResolvingLink(true)
+      try {
+        const res = await resolveMapLink(token, parsed.url)
+        found = { latitude: res.latitude, longitude: res.longitude, source: parsed.source, placeName: res.placeName }
+      } catch (err: unknown) {
+        setLinkError(errorMessage(err, 'That link could not be read. Please try again.'))
+        return
+      } finally {
+        setIsResolvingLink(false)
+      }
+    }
+    const lat = found.latitude.toFixed(6)
+    const lng = found.longitude.toFixed(6)
+    setForm((prev) => ({
+      ...prev,
+      latitude: lat,
+      longitude: lng,
+      officeName: prev.officeName.trim() || !found.placeName ? prev.officeName : found.placeName.slice(0, LIMITS.officeNameMaxLength),
+    }))
+    setFieldErrors((prev) => ({ ...prev, latitude: undefined, longitude: undefined }))
+    setSuccessMsg('')
+    setLinkNote(`Found ${lat}, ${lng} from the ${sourceLabel(found.source)}. Check the pin on the map before saving.`)
+  }
+
   const updateField = (key: keyof FormState, value: string | boolean) => {
+    // A map link pasted into a coordinate field is read like the link box
+    if ((key === 'latitude' || key === 'longitude') && typeof value === 'string' && /[a-z]{2,}\.[a-z]{2,}|°/i.test(value)) {
+      setMapLink(value)
+      void applyMapLink(value)
+      return
+    }
     setForm((prev) => {
       // Accept "lat, lng" pasted into either coordinate field
       if ((key === 'latitude' || key === 'longitude') && typeof value === 'string' && value.includes(',')) {
@@ -489,7 +540,7 @@ export function OfficeGeofence() {
               </div>
               <div>
                 <h2 className="text-[16px] font-bold text-slate-900 tracking-tight">Edit Office Location</h2>
-                <p className="text-[12px] text-slate-500">Paste "latitude, longitude" from any map into either field</p>
+                <p className="text-[12px] text-slate-500">Paste a Google Maps or Apple Maps link, or enter the coordinates</p>
               </div>
             </div>
 
@@ -498,6 +549,39 @@ export function OfficeGeofence() {
               <input id="geo-name" type="text" value={form.officeName} maxLength={LIMITS.officeNameMaxLength}
                 onChange={(e) => updateField('officeName', e.target.value)} className={inputClass('officeName')} placeholder="Head Office" />
               {fieldError('officeName')}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="geo-link" className="text-[11px] font-bold text-slate-500 uppercase">Map link or coordinates</label>
+              <div className="flex gap-2">
+                <input id="geo-link" type="text" value={mapLink} autoComplete="off" spellCheck={false}
+                  onChange={(e) => { setMapLink(e.target.value); setLinkError(''); setLinkNote('') }}
+                  onPaste={(e) => {
+                    const text = e.clipboardData.getData('text')
+                    if (text.trim()) {
+                      e.preventDefault()
+                      setMapLink(text.trim())
+                      void applyMapLink(text)
+                    }
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void applyMapLink(mapLink) } }}
+                  className={`min-w-0 flex-1 rounded-xl border px-3 py-2 text-sm text-slate-800 bg-white/70 outline-none focus:ring-2 focus:ring-red-100 focus:border-red-300 ${linkError ? 'border-red-300' : 'border-slate-200'}`}
+                  placeholder="https://maps.app.goo.gl/…  or  10.003902, 76.375725" />
+                <button type="button" onClick={() => void applyMapLink(mapLink)} disabled={isResolvingLink || !mapLink.trim()}
+                  className="shrink-0 px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px]">{isResolvingLink ? 'progress_activity' : 'travel_explore'}</span>
+                  {isResolvingLink ? 'Reading…' : 'Use link'}
+                </button>
+              </div>
+              {linkError ? (
+                <p className="text-[11.5px] font-medium text-red-600">{linkError}</p>
+              ) : linkNote ? (
+                <p className="text-[11.5px] font-medium text-emerald-700">{linkNote}</p>
+              ) : (
+                <p className="text-[11.5px] text-slate-500">
+                  In Google Maps or Apple Maps, long-press the office to drop a pin, then Share → Copy link and paste it here.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

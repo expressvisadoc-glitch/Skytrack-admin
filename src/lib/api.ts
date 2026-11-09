@@ -2964,6 +2964,19 @@ export async function getGeofenceSettings(token: string): Promise<{
   })
 }
 
+/** Reads the coordinates behind a Google Maps / Apple Maps share link (short links need the server) */
+export async function resolveMapLink(token: string, url: string): Promise<{
+  success: boolean
+  latitude: number
+  longitude: number
+  placeName?: string | null
+}> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_resolve_map_link',
+    url,
+  })
+}
+
 export async function saveGeofenceSettings(token: string, settings: GeofenceSettingsInput): Promise<{
   success: boolean
   message?: string

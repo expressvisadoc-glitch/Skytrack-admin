@@ -2,7 +2,14 @@ interface Env {
   ASSETS: {
     fetch: typeof fetch
   }
+  /**
+   * Edge Function the /api/skytrack proxy forwards to. Set only on the separate testing worker
+   * (wrangler.staging.jsonc -> staging Supabase). The live worker does not set it and keeps using production.
+   */
+  SKYTRACK_API_TARGET?: string
 }
+
+const PRODUCTION_API_TARGET = 'https://cwtrrtbodqctntkpnjlv.supabase.co/functions/v1/skytrack-api'
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -10,7 +17,7 @@ export default {
 
     // Proxy SkyTrack API requests server-to-server to avoid browser CORS and network barriers
     if (url.pathname.startsWith('/api/skytrack')) {
-      const targetUrl = 'https://cwtrrtbodqctntkpnjlv.supabase.co/functions/v1/skytrack-api'
+      const targetUrl = env.SKYTRACK_API_TARGET || PRODUCTION_API_TARGET
 
       if (request.method === 'OPTIONS') {
         return new Response('ok', {

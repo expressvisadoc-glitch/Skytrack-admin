@@ -134,7 +134,7 @@ function App() {
           />
 
           {/* Main Body Content Frame */}
-          <div className="lg:pl-72 transition-all duration-300">
+          <div className="lg:pl-[var(--sidebar-w)] transition-[padding] duration-300">
             <Header 
               onSelectTab={handleSelectTab} 
               onToggleSidebar={() => setIsSidebarOpen(true)} 
@@ -199,7 +199,7 @@ function App() {
         />
 
         {/* Main Body Content Frame */}
-        <div className="lg:pl-72 transition-all duration-300">
+        <div className="lg:pl-[var(--sidebar-w)] transition-[padding] duration-300">
           <EmployeeHeader 
             onSelectTab={handleSelectTab} 
             onToggleSidebar={() => setIsSidebarOpen(true)} 
