@@ -178,7 +178,9 @@ export async function generatePayslipPdf(p: Payslip): Promise<Blob> {
   row('Less: Absences', formatDays(s.absenceDays), `- ${formatPdfAmount(s.absenceAmount)}`, cRed)
   row('Less: Loss of pay (LOP) leave', formatDays(s.lopLeaveDays), `- ${formatPdfAmount(s.lopLeaveAmount)}`, cRed)
   row(
-    `Less: Late marks (${s.lateMarks ?? 0} marks, ${s.lateMarksPerUnit ?? '-'} = ${formatDays(s.lateLopDaysPerUnit)} day)`,
+    s.latePenaltyMode === 'per_minute'
+      ? `Less: Late check-ins (${s.lateMinutes ?? 0} min over ${s.lateMarks ?? 0} day${s.lateMarks === 1 ? '' : 's'})`
+      : `Less: Late marks (${s.lateMarks ?? 0} marks, ${s.lateMarksPerUnit ?? '-'} = ${formatDays(s.lateLopDaysPerUnit)} day)`,
     formatDays(s.lateLopDays),
     `- ${formatPdfAmount(s.lateAmount)}`,
     cRed

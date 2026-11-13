@@ -2988,12 +2988,23 @@ export async function saveGeofenceSettings(token: string, settings: GeofenceSett
   })
 }
 
+/** How a late check-in affects pay. Option 1 = groups of late marks, option 2 = every late minute. */
+export type LatePenaltyMode = 'marks' | 'per_minute'
+/** A late minute is worth a share of the day's pay ('pro_rata') or a set amount ('fixed'). */
+export type LatePerMinuteBasis = 'pro_rata' | 'fixed'
+
 export interface PayrollPolicy {
   weekOffDays: number[]
   weekOffDayNames: string[]
   lateGraceMinutes: number
   lateMarksPerUnit: number
   lateLopDaysPerUnit: number
+  latePenaltyMode: LatePenaltyMode
+  latePerMinuteBasis: LatePerMinuteBasis
+  /** Rupees per late minute when latePerMinuteBasis is 'fixed' */
+  latePerMinuteAmount: number
+  /** Largest number of late minutes charged on one day; 0 = no cap */
+  latePerMinuteMaxMinutesPerDay: number
   officeTimezone: string
   /** Only used for the "break exceeded" reminder; null on history entries saved before it existed */
   maxBreakMinutes: number | null
@@ -3012,6 +3023,10 @@ export interface PayrollPolicyInput {
   lateGraceMinutes: number
   lateMarksPerUnit: number
   lateLopDaysPerUnit: number
+  latePenaltyMode: LatePenaltyMode
+  latePerMinuteBasis: LatePerMinuteBasis
+  latePerMinuteAmount: number
+  latePerMinuteMaxMinutesPerDay: number
   officeTimezone: string
   maxBreakMinutes: number
 }
@@ -3073,6 +3088,8 @@ export interface SalaryDay {
   type: 'absent' | 'lop_leave' | 'late'
   days: number
   amount: number
+  /** Late days only: the minutes charged (per-minute option) or the minutes recorded (marks option) */
+  minutes?: number | null
 }
 
 /** Result of the backend's compute_payroll(). Figures are provisional until payroll is locked. */
@@ -3094,9 +3111,20 @@ export interface SalarySummary {
   absenceAmount: number | null
   lopLeaveDays: number | null
   lopLeaveAmount: number | null
+  latePenaltyMode: LatePenaltyMode
   lateMarks: number | null
   lateMarksPerUnit: number | null
   lateLopDaysPerUnit: number | null
+  /** Per-minute option: total late minutes charged this month */
+  lateMinutes: number | null
+  /** Per-minute option: how many days carried a late deduction */
+  lateDaysCharged: number | null
+  latePerMinuteBasis: LatePerMinuteBasis | null
+  latePerMinuteAmount: number | null
+  /** Per-minute option: rupees per minute actually applied (per-day rate ÷ shift minutes when pro-rata) */
+  latePerMinuteRate: number | null
+  latePerMinuteMaxMinutesPerDay: number | null
+  lateGraceMinutes: number | null
   lateLopDays: number | null
   lateAmount: number | null
   totalLopDays: number | null

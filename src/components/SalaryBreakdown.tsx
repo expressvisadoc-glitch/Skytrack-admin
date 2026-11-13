@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { formatRupees, formatDate, type SalarySummary } from '../lib/api'
-import { formatDays, salaryFlagLabel } from '../lib/salary'
+import { formatDays, formatMinutes, lateDeductionDetail, salaryFlagLabel } from '../lib/salary'
 
 const DAY_TYPE_LABEL: Record<string, string> = {
   absent: 'Absent (no check-in)',
@@ -17,10 +17,7 @@ interface SalaryBreakdownProps {
 export function SalaryBreakdown({ salary, showDays = true }: SalaryBreakdownProps) {
   const [showAllDays, setShowAllDays] = useState(false)
   const days = salary.days ?? []
-  const lateText =
-    salary.lateMarksPerUnit && salary.lateLopDaysPerUnit
-      ? `${salary.lateMarks ?? 0} late mark${salary.lateMarks === 1 ? '' : 's'} (${salary.lateMarksPerUnit} = ${salary.lateLopDaysPerUnit} day)`
-      : `${salary.lateMarks ?? 0} late marks`
+  const isPerMinute = salary.latePenaltyMode === 'per_minute'
   const earnedIsProrated = salary.earnedGross !== null && salary.monthlyGross !== null && salary.earnedGross !== salary.monthlyGross
 
   const rows: [string, string, string, boolean][] = [
@@ -30,7 +27,12 @@ export function SalaryBreakdown({ salary, showDays = true }: SalaryBreakdownProp
       : []),
     ['Absences', `${formatDays(salary.absenceDays)} day${salary.absenceDays === 1 ? '' : 's'}`, `−${formatRupees(salary.absenceAmount)}`, true],
     ['Unpaid (LOP) leave', `${formatDays(salary.lopLeaveDays)} day${salary.lopLeaveDays === 1 ? '' : 's'}`, `−${formatRupees(salary.lopLeaveAmount)}`, true],
-    ['Late check-ins', `${lateText} → ${formatDays(salary.lateLopDays)} day`, `−${formatRupees(salary.lateAmount)}`, true],
+    [
+      isPerMinute ? 'Late check-ins (per minute)' : 'Late check-ins',
+      lateDeductionDetail(salary),
+      `−${formatRupees(salary.lateAmount)}`,
+      true,
+    ],
   ]
 
   const visibleDays = showAllDays ? days : days.slice(0, 8)
@@ -73,7 +75,11 @@ export function SalaryBreakdown({ salary, showDays = true }: SalaryBreakdownProp
                   <span className="font-semibold">{formatDate(d.date)}</span> · {DAY_TYPE_LABEL[d.type] ?? d.type}
                 </span>
                 <span className="font-semibold text-slate-500">
-                  {d.type === 'late' ? 'late mark' : `−${formatRupees(d.amount)}`}
+                  {d.type !== 'late'
+                    ? `−${formatRupees(d.amount)}`
+                    : isPerMinute
+                      ? `${formatMinutes(d.minutes)} · −${formatRupees(d.amount)}`
+                      : 'late mark'}
                 </span>
               </li>
             ))}

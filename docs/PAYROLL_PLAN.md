@@ -22,7 +22,9 @@ Status: **Phases 0, 1 and 2 implemented** (staging-tested, not merged or deploye
 | LOP leave | Unpaid days of approved leaves; see §4.3 for how a leave's paid/LOP days are placed on dates |
 | Paid leave | No deduction |
 | Late mark | Check-in later than the employee's shift start + grace (grace = 0). Precision: whole minutes (10:00:45 is on time, 10:01 is late). |
-| Late conversion | Only complete pairs count: `late_lop_days = floor(late_marks ÷ 2) × 0.5` → 2–3 marks = 0.5 day, 4–5 = 1 day, 6–7 = 1.5 days |
+| **Late penalty option** | Admin-selectable on the Payroll Settings page (`payroll_policy.late_penalty_mode`). **Option 1 `marks`** (default, unchanged) or **Option 2 `per_minute`**. The option changes only how late marks are priced; the marks themselves are recorded the same way in both. |
+| Option 1 — late conversion | Only complete pairs count: `late_lop_days = floor(late_marks ÷ 2) × 0.5` → 2–3 marks = 0.5 day, 4–5 = 1 day, 6–7 = 1.5 days |
+| Option 2 — per minute | Every minute after the shift start (beyond that day's grace) is deducted, on every late day. A minute is worth either a **share of the day's pay** (`late_per_minute_basis = 'pro_rata'`: `per_day_rate ÷ the day's shift working minutes`) or a **flat amount** (`'fixed'`: `late_per_minute_amount` rupees). Optional daily limit `late_per_minute_max_minutes_per_day` (0 = none). A day's late deduction never exceeds the pay that day still has left after LOP leave or absence, so one day can never cost more than one day. |
 | Waiving late marks | Not supported |
 | Short working hours | No deduction (no half-day rule) |
 | Missed checkout | No deduction |
@@ -47,6 +49,8 @@ All inputs are read from the database at calculation time and are admin-editable
 | Shift start | The employee's `work_shift_id` → `work_shifts.start_time` |
 | Week-off days | `payroll_policy.week_off_days` (currently Sunday) |
 | Late grace, late conversion | `payroll_policy.late_grace_minutes` (0), `late_marks_per_unit` (2), `late_lop_days_per_unit` (0.5) |
+| Late penalty option | `payroll_policy.late_penalty_mode` (`marks`), `late_per_minute_basis` (`pro_rata`), `late_per_minute_amount` (0), `late_per_minute_max_minutes_per_day` (0) |
+| Shift length (per-minute pricing) | `attendance_late_marks.shift_working_minutes`, recorded with the late mark from `work_shifts.working_minutes` |
 | Office timezone | `payroll_policy.office_timezone` (`Asia/Kolkata`) — used only to interpret shift start times |
 | Salaries | `salary_structures` |
 
@@ -67,8 +71,10 @@ Changing a shift's start time or moving an employee to another shift does not al
 
 ### 4.2. Late marks
 - At check-in: `late = local_time(check_in, office_timezone) > shift.start_time + grace` (minute precision).
-- Stored in a new table `attendance_late_marks` (one row per attendance day: shift id and start time used, grace,
-  minutes late, decided at, decided by). The `attendance` table is not restructured.
+- Stored in a new table `attendance_late_marks` (one row per attendance day: shift id, start time and working
+  minutes used, grace, minutes late, decided at, decided by). The `attendance` table is not restructured.
+- The shift length is recorded with the mark so option 2's per-minute price for a past day never changes when a
+  shift is later edited or the employee is moved to another shift.
 - The attendance row's existing `status` is also set to `late`, so the admin dashboard's existing "Late Check-in"
   badge starts working. This replaces the hardcoded 09:15 IST rule in admin manual attendance.
 - Employees without a shift get no late marks and are flagged on the admin payroll page.
@@ -284,3 +290,41 @@ late marks, half-day rules for short hours, multiple branches, bank payment file
 | 17 | Built on `feature/office-geofencing`; staging project only |
 | 18 | Payslip on the company letterhead with company, employee details, month, working/paid days, gross, itemised deductions and net; no bank details, logo or signature line |
 | 19 | Monthly Google Sheets archive via a service account (option C, personal Gmail), set up after go-live — [GOOGLE_SHEETS_EXPORT.md](GOOGLE_SHEETS_EXPORT.md) |
+| 20 | Two late-penalty options, chosen by the admin: option 1 groups of late marks (default, existing behaviour), option 2 every late minute. Option 2 prices a minute pro-rata from the salary and the shift length by default, or at a flat amount; an optional daily minute limit applies, and a day is never deducted more than its own pay. Switching the option re-prices open months on the next calculation and never touches the recorded late marks; locked months keep their payslip figures. |
+
+## 14. Late-penalty options implementation notes (option 2)
+
+Delivered on `security/checkIn` (staging only), migration `20261113000000_late_penalty_per_minute.sql`:
+- `payroll_policy` and `payroll_policy_history` gain `late_penalty_mode`, `late_per_minute_basis`,
+  `late_per_minute_amount` and `late_per_minute_max_minutes_per_day`, with CHECK constraints; a flat per-minute
+  deduction of 0 is refused. `save_payroll_policy()` takes the four new values (defaulted, so older callers keep
+  the stored option) and writes them to the history row.
+- `attendance_late_marks.shift_working_minutes` records the shift length used for the day (back-filled for
+  existing rows), so option 2's pricing of a past day is frozen like its shift start and grace.
+- `compute_payroll()` prices late marks by the option. Option 1 is unchanged. Option 2 charges, per late day,
+  `minutes_late − that day's grace` (optionally capped), priced pro-rata or flat, limited to the pay the day has
+  left. The result adds `late_penalty_mode`, `late_minutes`, `late_days_charged`, `late_per_minute_basis`,
+  `late_per_minute_amount`, `late_per_minute_rate`, `late_per_minute_max_minutes_per_day`, `late_grace_minutes`,
+  and `minutes` on each late day; `late_lop_days` becomes the equivalent days so the payslip's total still adds up.
+- Edge Function: `admin_payroll_policy` / `admin_save_payroll_policy` read and validate the option (clients that
+  do not send it keep the stored one); `salary_summary`, `admin_salary_get`, `admin_payroll_month`, `payslip_get`
+  and `admin_payslip_get` pass the new figures through.
+- Web: the Payroll Settings page shows the two options as cards with a worked example; the breakdown, employee
+  card, Payroll table, CSV export and payslip PDF show minutes and the per-minute rate under option 2.
+- Android: `SalaryDto` and `SalaryDayDto` read the new fields; the Home salary card shows
+  "Late check-ins (per minute) — 2 hr 32 min late over 5 days · ₹1.74/min" and the per-day minutes; the payslip
+  PDF line follows the option.
+
+Verification (staging only): 70 SQL calculation tests (both options, pairs and incomplete pairs, pro-rata and flat
+rates, daily cap, per-day cap, grace, non-working days, no shift, LOP-leave overlap, option switching, frozen shift
+length, policy guards, provisional mid-month figures), 71 HTTP checks through the deployed staging function with
+SKY002/SKY007 (salary ₹20,000, October 2026: 24 working days, 5 late check-ins, 1 absence, 1 LOP leave day, both
+options, live re-read after a punch, permissions, lock/reopen, payslip), web `tsc -b` + production build, and 52
+Android unit tests.
+
+**Bug found and fixed during this QA** (`approve_leave`, pre-existing): approving a leave request that was already
+approved fell through to the Edge Function's direct-approval fallback, which marked every casual/sick day as paid
+regardless of the balance and added the days to `used_days` again — silently turning an LOP day back into a paid
+day and overstating the month's salary. `approve_leave` now refuses anything that is not `pending`
+(HTTP 409 `leave_not_pending`), and the fallback caps paid days at the remaining balance and puts the rest in
+`lop_days`, matching `approve_leave_request()`.

@@ -6,7 +6,10 @@ import {
   type PayrollPolicy,
   type PayrollPolicyHistoryEntry,
   type PayrollPolicyInput,
+  type LatePenaltyMode,
+  type LatePerMinuteBasis,
 } from '../lib/api'
+import { formatMinutes, latePolicySummary } from '../lib/salary'
 import { SkeletonPage } from './Skeleton'
 
 // Mirrors PAYROLL_POLICY_LIMITS in the skytrack-api Edge Function and the table CHECK constraints.
@@ -14,6 +17,8 @@ const LIMITS = {
   lateGraceMinutes: { min: 0, max: 240 },
   lateMarksPerUnit: { min: 1, max: 31 },
   lateLopDaysPerUnit: { min: 0.01, max: 1 },
+  latePerMinuteAmount: { min: 0.01, max: 10000 },
+  latePerMinuteMaxMinutesPerDay: { min: 0, max: 1440 },
   maxBreakMinutes: { min: 5, max: 480 },
   maxWeekOffDays: 6,
 }
@@ -23,8 +28,12 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 interface FormState {
   weekOffDays: number[]
   lateGraceMinutes: string
+  latePenaltyMode: LatePenaltyMode
   lateMarksPerUnit: string
   lateLopDaysPerUnit: string
+  latePerMinuteBasis: LatePerMinuteBasis
+  latePerMinuteAmount: string
+  latePerMinuteMaxMinutesPerDay: string
   officeTimezone: string
   maxBreakMinutes: string
 }
@@ -35,8 +44,12 @@ function formFromPolicy(p: PayrollPolicy | null): FormState {
   return {
     weekOffDays: p?.weekOffDays ?? [],
     lateGraceMinutes: p ? String(p.lateGraceMinutes) : '',
+    latePenaltyMode: p?.latePenaltyMode ?? 'marks',
     lateMarksPerUnit: p ? String(p.lateMarksPerUnit) : '',
     lateLopDaysPerUnit: p ? String(p.lateLopDaysPerUnit) : '',
+    latePerMinuteBasis: p?.latePerMinuteBasis ?? 'pro_rata',
+    latePerMinuteAmount: p && p.latePerMinuteAmount > 0 ? String(p.latePerMinuteAmount) : '',
+    latePerMinuteMaxMinutesPerDay: p ? String(p.latePerMinuteMaxMinutesPerDay ?? 0) : '0',
     officeTimezone: p?.officeTimezone ?? '',
     maxBreakMinutes: p?.maxBreakMinutes != null ? String(p.maxBreakMinutes) : '60',
   }
@@ -65,6 +78,28 @@ function validate(form: FormState, timezones: Set<string>): { errors: FieldError
     errors.lateLopDaysPerUnit = 'Enter a value from 0.01 to 1 (e.g. 0.5) with at most two decimals.'
   }
 
+  // Option 2 only: the flat amount is required, the daily cap is optional (0 = no cap)
+  const perMinute = /^\s*\d*(\.\d{1,2})?\s*$/.test(form.latePerMinuteAmount)
+    ? Number(form.latePerMinuteAmount)
+    : NaN
+  const isPerMinute = form.latePenaltyMode === 'per_minute'
+  if (isPerMinute && form.latePerMinuteBasis === 'fixed') {
+    if (
+      !form.latePerMinuteAmount.trim() ||
+      !Number.isFinite(perMinute) ||
+      perMinute < LIMITS.latePerMinuteAmount.min ||
+      perMinute > LIMITS.latePerMinuteAmount.max
+    ) {
+      errors.latePerMinuteAmount = `Enter the rupees deducted per late minute (${LIMITS.latePerMinuteAmount.min} to ${LIMITS.latePerMinuteAmount.max}).`
+    }
+  }
+  const perMinuteCap = wholeNumber(
+    'latePerMinuteMaxMinutesPerDay',
+    form.latePerMinuteMaxMinutesPerDay.trim() === '' ? '0' : form.latePerMinuteMaxMinutesPerDay,
+    LIMITS.latePerMinuteMaxMinutesPerDay,
+    ' minutes (0 = no cap)',
+  )
+
   const tz = form.officeTimezone.trim()
   if (!tz || (timezones.size > 0 && !timezones.has(tz))) {
     errors.officeTimezone = 'Choose a timezone from the list.'
@@ -76,8 +111,12 @@ function validate(form: FormState, timezones: Set<string>): { errors: FieldError
     value: {
       weekOffDays: [...form.weekOffDays].sort((a, b) => a - b),
       lateGraceMinutes: grace,
+      latePenaltyMode: form.latePenaltyMode,
       lateMarksPerUnit: marks,
       lateLopDaysPerUnit: lop,
+      latePerMinuteBasis: form.latePerMinuteBasis,
+      latePerMinuteAmount: Number.isFinite(perMinute) ? perMinute : 0,
+      latePerMinuteMaxMinutesPerDay: perMinuteCap,
       officeTimezone: tz,
       maxBreakMinutes: maxBreak,
     },
@@ -108,6 +147,19 @@ function describeLateRule(marks: number, lop: number): string {
   return examples
     .map((count, i) => `${count} late mark${count === 1 ? '' : 's'} = ${+(lop * (i + 1)).toFixed(2)} day LOP`)
     .join(' · ')
+}
+
+/** Worked example under the per-minute option, so the admin sees what the setting will cost. */
+function describePerMinuteRule(basis: LatePerMinuteBasis, amount: number, cap: number, grace: number): string {
+  const graceText = grace > 0 ? ` after the ${grace}-minute grace` : ''
+  const capText = cap > 0 ? ` No more than ${formatMinutes(cap)} is charged on one day.` : ''
+  if (basis === 'fixed') {
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return `Every late minute${graceText} is deducted at the amount you enter.${capText}`
+    }
+    return `30 minutes late${graceText} = ₹${(amount * 30).toFixed(2)} deducted (₹${amount.toFixed(2)} × 30).${capText}`
+  }
+  return `Every late minute${graceText} costs that minute's share of the day's pay (per-day rate ÷ the shift's working minutes). On ₹20,000 over 24 working days and an 8-hour shift that is about ₹1.74 a minute.${capText}`
 }
 
 function weekOffLabel(days: number[]): string {
@@ -215,6 +267,12 @@ export function PayrollSettings() {
 
   const isDirty = JSON.stringify(form) !== JSON.stringify(formFromPolicy(policy))
   const ruleExample = describeLateRule(Number(form.lateMarksPerUnit), Number(form.lateLopDaysPerUnit))
+  const perMinuteExample = describePerMinuteRule(
+    form.latePerMinuteBasis,
+    Number(form.latePerMinuteAmount),
+    Number(form.latePerMinuteMaxMinutesPerDay),
+    Number(form.lateGraceMinutes),
+  )
 
   if (isLoading) {
     return (
@@ -273,10 +331,8 @@ export function PayrollSettings() {
               <dd className="font-semibold text-slate-800 text-right">{weekOffLabel(pendingSave.weekOffDays)}</dd>
               <dt className="text-slate-500">Late grace</dt>
               <dd className="font-semibold text-slate-800 text-right">{pendingSave.lateGraceMinutes} min</dd>
-              <dt className="text-slate-500">Late deduction</dt>
-              <dd className="font-semibold text-slate-800 text-right">
-                {pendingSave.lateMarksPerUnit} marks = {pendingSave.lateLopDaysPerUnit} day
-              </dd>
+              <dt className="text-slate-500">Late penalty</dt>
+              <dd className="font-semibold text-slate-800 text-right">{latePolicySummary(pendingSave)}</dd>
               <dt className="text-slate-500">Allowed break</dt>
               <dd className="font-semibold text-slate-800 text-right">{pendingSave.maxBreakMinutes} min</dd>
               <dt className="text-slate-500">Office timezone</dt>
@@ -352,7 +408,7 @@ export function PayrollSettings() {
             {[
               ['Week-off days', weekOffLabel(policy.weekOffDays)],
               ['Late grace', `${policy.lateGraceMinutes} min after shift start`],
-              ['Late deduction', `${policy.lateMarksPerUnit} marks = ${policy.lateLopDaysPerUnit} day LOP`],
+              ['Late penalty', latePolicySummary(policy)],
               ['Allowed break', policy.maxBreakMinutes != null ? `${policy.maxBreakMinutes} min` : '—'],
               ['Office timezone', policy.officeTimezone],
               ['Last changed', formatDateTime(policy.updatedAt)],
@@ -401,30 +457,145 @@ export function PayrollSettings() {
             )}
           </fieldset>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="pp-grace" className="text-[11px] font-bold text-slate-500 uppercase">Late grace (minutes)</label>
-              <input id="pp-grace" type="number" min={LIMITS.lateGraceMinutes.min} max={LIMITS.lateGraceMinutes.max} step={1}
-                value={form.lateGraceMinutes} onChange={(e) => updateField('lateGraceMinutes', e.target.value)} className={inputClass('lateGraceMinutes')} />
-              {fieldError('lateGraceMinutes')}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="pp-marks" className="text-[11px] font-bold text-slate-500 uppercase">Late marks per deduction</label>
-              <input id="pp-marks" type="number" min={LIMITS.lateMarksPerUnit.min} max={LIMITS.lateMarksPerUnit.max} step={1}
-                value={form.lateMarksPerUnit} onChange={(e) => updateField('lateMarksPerUnit', e.target.value)} className={inputClass('lateMarksPerUnit')} />
-              {fieldError('lateMarksPerUnit')}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="pp-lop" className="text-[11px] font-bold text-slate-500 uppercase">LOP days per deduction</label>
-              <input id="pp-lop" type="text" inputMode="decimal"
-                value={form.lateLopDaysPerUnit} onChange={(e) => updateField('lateLopDaysPerUnit', e.target.value)} className={inputClass('lateLopDaysPerUnit')} />
-              {fieldError('lateLopDaysPerUnit')}
-            </div>
+          <div className="flex flex-col gap-1.5 sm:max-w-xs">
+            <label htmlFor="pp-grace" className="text-[11px] font-bold text-slate-500 uppercase">Late grace (minutes)</label>
+            <input id="pp-grace" type="number" min={LIMITS.lateGraceMinutes.min} max={LIMITS.lateGraceMinutes.max} step={1}
+              value={form.lateGraceMinutes} onChange={(e) => updateField('lateGraceMinutes', e.target.value)} className={inputClass('lateGraceMinutes')} />
+            {fieldError('lateGraceMinutes') ?? (
+              <p className="text-[11.5px] text-slate-400">
+                A check-in later than the shift start plus this grace (to the minute) counts as late.
+              </p>
+            )}
           </div>
-          <p className="text-[11.5px] text-slate-500 -mt-2 leading-relaxed">
-            A check-in later than the employee's shift start plus the grace (to the minute) is a late mark. Only
-            complete groups count{ruleExample ? `: ${ruleExample}.` : '.'}
-          </p>
+
+          {/* How a late check-in affects pay */}
+          <fieldset className="flex flex-col gap-3">
+            <legend className="text-[11px] font-bold text-slate-500 uppercase mb-2">How late check-ins affect pay</legend>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {([
+                {
+                  mode: 'marks' as LatePenaltyMode,
+                  title: 'Option 1 · Late marks',
+                  summary: 'Groups of late marks cost a part of a day',
+                  detail: 'A fixed number of late days adds up to a LOP deduction. Only complete groups count.',
+                },
+                {
+                  mode: 'per_minute' as LatePenaltyMode,
+                  title: 'Option 2 · Per minute',
+                  summary: 'Every late minute is deducted',
+                  detail: "Each minute after the shift start (beyond the grace) is deducted on every late day.",
+                },
+              ]).map((opt) => {
+                const active = form.latePenaltyMode === opt.mode
+                return (
+                  <label
+                    key={opt.mode}
+                    className={`flex flex-col gap-1 rounded-xl border p-4 cursor-pointer transition-colors ${
+                      active ? 'border-red-300 bg-red-50/60 ring-1 ring-red-200' : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="late-penalty-mode"
+                        className="accent-red-600"
+                        checked={active}
+                        onChange={() => {
+                          setForm((prev) => ({ ...prev, latePenaltyMode: opt.mode }))
+                          setFieldErrors({})
+                          setSuccessMsg('')
+                        }}
+                      />
+                      <span className="text-[13px] font-bold text-slate-900">{opt.title}</span>
+                    </div>
+                    <span className="text-[12px] font-semibold text-slate-600">{opt.summary}</span>
+                    <span className="text-[11.5px] text-slate-400 leading-relaxed">{opt.detail}</span>
+                  </label>
+                )
+              })}
+            </div>
+
+            {form.latePenaltyMode === 'marks' ? (
+              <div className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="pp-marks" className="text-[11px] font-bold text-slate-500 uppercase">Late marks per deduction</label>
+                    <input id="pp-marks" type="number" min={LIMITS.lateMarksPerUnit.min} max={LIMITS.lateMarksPerUnit.max} step={1}
+                      value={form.lateMarksPerUnit} onChange={(e) => updateField('lateMarksPerUnit', e.target.value)} className={inputClass('lateMarksPerUnit')} />
+                    {fieldError('lateMarksPerUnit')}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="pp-lop" className="text-[11px] font-bold text-slate-500 uppercase">LOP days per deduction</label>
+                    <input id="pp-lop" type="text" inputMode="decimal"
+                      value={form.lateLopDaysPerUnit} onChange={(e) => updateField('lateLopDaysPerUnit', e.target.value)} className={inputClass('lateLopDaysPerUnit')} />
+                    {fieldError('lateLopDaysPerUnit')}
+                  </div>
+                </div>
+                <p className="text-[11.5px] text-slate-500 leading-relaxed">
+                  Only complete groups count{ruleExample ? `: ${ruleExample}.` : '.'}
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 rounded-xl border border-slate-200 p-4">
+                <div className="flex flex-col gap-2">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase">What a late minute costs</span>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    {([
+                      { basis: 'pro_rata' as LatePerMinuteBasis, label: "Share of the day's pay", hint: "per-day rate ÷ the shift's working minutes" },
+                      { basis: 'fixed' as LatePerMinuteBasis, label: 'Fixed amount', hint: 'the same rupees for every employee' },
+                    ]).map((opt) => {
+                      const active = form.latePerMinuteBasis === opt.basis
+                      return (
+                        <label
+                          key={opt.basis}
+                          className={`flex-1 flex flex-col gap-0.5 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
+                            active ? 'border-red-300 bg-red-50/60' : 'border-slate-200 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="late-per-minute-basis"
+                              className="accent-red-600"
+                              checked={active}
+                              onChange={() => {
+                                setForm((prev) => ({ ...prev, latePerMinuteBasis: opt.basis }))
+                                setFieldErrors({})
+                                setSuccessMsg('')
+                              }}
+                            />
+                            <span className="text-[12.5px] font-bold text-slate-800">{opt.label}</span>
+                          </span>
+                          <span className="text-[11px] text-slate-400 pl-6">{opt.hint}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {form.latePerMinuteBasis === 'fixed' && (
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="pp-per-min" className="text-[11px] font-bold text-slate-500 uppercase">Rupees per late minute</label>
+                      <input id="pp-per-min" type="text" inputMode="decimal" placeholder="e.g. 5"
+                        value={form.latePerMinuteAmount} onChange={(e) => updateField('latePerMinuteAmount', e.target.value)} className={inputClass('latePerMinuteAmount')} />
+                      {fieldError('latePerMinuteAmount')}
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="pp-per-min-cap" className="text-[11px] font-bold text-slate-500 uppercase">Charge at most (minutes/day)</label>
+                    <input id="pp-per-min-cap" type="number" min={LIMITS.latePerMinuteMaxMinutesPerDay.min} max={LIMITS.latePerMinuteMaxMinutesPerDay.max} step={1}
+                      value={form.latePerMinuteMaxMinutesPerDay} onChange={(e) => updateField('latePerMinuteMaxMinutesPerDay', e.target.value)} className={inputClass('latePerMinuteMaxMinutesPerDay')} />
+                    {fieldError('latePerMinuteMaxMinutesPerDay') ?? (
+                      <p className="text-[11.5px] text-slate-400">0 = no cap. A day is never deducted more than that day's pay.</p>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[11.5px] text-slate-500 leading-relaxed">{perMinuteExample}</p>
+              </div>
+            )}
+          </fieldset>
 
           <div className="flex flex-col gap-1.5 sm:max-w-sm">
             <label htmlFor="pp-break" className="text-[11px] font-bold text-slate-500 uppercase">Allowed break (minutes)</label>
@@ -488,7 +659,7 @@ export function PayrollSettings() {
                     <th className="py-2 pr-3 font-bold">By</th>
                     <th className="py-2 pr-3 font-bold">Week-off</th>
                     <th className="py-2 pr-3 font-bold">Grace</th>
-                    <th className="py-2 pr-3 font-bold">Late deduction</th>
+                    <th className="py-2 pr-3 font-bold">Late penalty</th>
                     <th className="py-2 pr-3 font-bold">Break</th>
                     <th className="py-2 font-bold">Timezone</th>
                   </tr>
@@ -500,7 +671,7 @@ export function PayrollSettings() {
                       <td className="py-2 pr-3 whitespace-nowrap">{h.changedBy?.name || '—'}</td>
                       <td className="py-2 pr-3">{weekOffLabel(h.weekOffDays)}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">{h.lateGraceMinutes} min</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">{h.lateMarksPerUnit} = {h.lateLopDaysPerUnit} day</td>
+                      <td className="py-2 pr-3">{latePolicySummary(h)}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">{h.maxBreakMinutes != null ? `${h.maxBreakMinutes} min` : '—'}</td>
                       <td className="py-2 whitespace-nowrap">{h.officeTimezone}</td>
                     </tr>

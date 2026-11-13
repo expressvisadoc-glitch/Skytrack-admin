@@ -2065,12 +2065,19 @@ async function handleAdminSaveGeofenceSettings(employee: any, body: any): Promis
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+const LATE_PENALTY_MODES = ["marks", "per_minute"] as const;
+const LATE_PER_MINUTE_BASES = ["pro_rata", "fixed"] as const;
+
 const PAYROLL_POLICY_LIMITS = {
   lateGraceMinutes: { min: 0, max: 240 },
   lateMarksPerUnit: { min: 1, max: 31 },
   lateLopDaysPerUnit: { min: 0.01, max: 1 },
+  latePerMinuteAmount: { min: 0, max: 10000 },
+  latePerMinuteMaxMinutesPerDay: { min: 0, max: 1440 },
   maxBreakMinutes: { min: 5, max: 480 },
-  maxWeekOffDays: 6
+  maxWeekOffDays: 6,
+  latePenaltyModes: LATE_PENALTY_MODES,
+  latePerMinuteBases: LATE_PER_MINUTE_BASES
 };
 
 async function getWeekOffDays(): Promise<number[]> {
@@ -2096,6 +2103,12 @@ function formatPayrollPolicy(row: any) {
     lateGraceMinutes: Number(row?.late_grace_minutes),
     lateMarksPerUnit: Number(row?.late_marks_per_unit),
     lateLopDaysPerUnit: Number(row?.late_lop_days_per_unit),
+    // Option 1 ("marks") charges groups of late marks; option 2 ("per_minute") charges every late minute
+    latePenaltyMode: row?.late_penalty_mode ?? "marks",
+    latePerMinuteBasis: row?.late_per_minute_basis ?? "pro_rata",
+    latePerMinuteAmount: row?.late_per_minute_amount == null ? 0 : Number(row.late_per_minute_amount),
+    latePerMinuteMaxMinutesPerDay:
+      row?.late_per_minute_max_minutes_per_day == null ? 0 : Number(row.late_per_minute_max_minutes_per_day),
     officeTimezone: row?.office_timezone ?? null,
     // Only used for the "break exceeded" reminder; it does not change pay
     maxBreakMinutes: row?.max_break_minutes == null ? null : Number(row.max_break_minutes),
@@ -2212,6 +2225,18 @@ function validatePayrollPolicyInput(body: any): { errors: string[]; value: any }
   const rawMaxBreak = input?.maxBreakMinutes ?? input?.max_break_minutes;
   const maxBreak = rawMaxBreak === undefined || rawMaxBreak === null ? undefined : toFiniteNumber(rawMaxBreak);
 
+  // Late-penalty option. Clients that do not send it keep whatever is stored (handled by the caller).
+  const rawMode = input?.latePenaltyMode ?? input?.late_penalty_mode;
+  const mode = rawMode === undefined || rawMode === null ? undefined : String(rawMode);
+  const rawBasis = input?.latePerMinuteBasis ?? input?.late_per_minute_basis;
+  const basis = rawBasis === undefined || rawBasis === null ? undefined : String(rawBasis);
+  const rawPerMinute = input?.latePerMinuteAmount ?? input?.late_per_minute_amount;
+  const perMinuteAmount =
+    rawPerMinute === undefined || rawPerMinute === null ? undefined : toFiniteNumber(rawPerMinute);
+  const rawPerMinuteCap = input?.latePerMinuteMaxMinutesPerDay ?? input?.late_per_minute_max_minutes_per_day;
+  const perMinuteCap =
+    rawPerMinuteCap === undefined || rawPerMinuteCap === null ? undefined : toFiniteNumber(rawPerMinuteCap);
+
   const { lateGraceMinutes, lateMarksPerUnit, lateLopDaysPerUnit, maxBreakMinutes } = PAYROLL_POLICY_LIMITS;
   if (!Number.isInteger(grace) || grace < lateGraceMinutes.min || grace > lateGraceMinutes.max) {
     errors.push(`Late grace must be a whole number from ${lateGraceMinutes.min} to ${lateGraceMinutes.max} minutes.`);
@@ -2234,6 +2259,38 @@ function validatePayrollPolicyInput(body: any): { errors: string[]; value: any }
     errors.push(`Allowed break must be a whole number from ${maxBreakMinutes.min} to ${maxBreakMinutes.max} minutes.`);
   }
 
+  const { latePerMinuteAmount, latePerMinuteMaxMinutesPerDay } = PAYROLL_POLICY_LIMITS;
+  if (mode !== undefined && !LATE_PENALTY_MODES.includes(mode as typeof LATE_PENALTY_MODES[number])) {
+    errors.push('Late penalty option must be "marks" (groups of late marks) or "per_minute" (every late minute).');
+  }
+  if (basis !== undefined && !LATE_PER_MINUTE_BASES.includes(basis as typeof LATE_PER_MINUTE_BASES[number])) {
+    errors.push('Per-minute basis must be "pro_rata" (share of the day\'s pay) or "fixed" (a set amount).');
+  }
+  if (
+    perMinuteAmount !== undefined &&
+    (!Number.isFinite(perMinuteAmount) ||
+      perMinuteAmount < latePerMinuteAmount.min ||
+      perMinuteAmount > latePerMinuteAmount.max ||
+      Math.round(perMinuteAmount * 100) !== perMinuteAmount * 100)
+  ) {
+    errors.push(
+      `The per-minute deduction must be from ${latePerMinuteAmount.min} to ${latePerMinuteAmount.max} with at most two decimals.`
+    );
+  }
+  if (
+    perMinuteCap !== undefined &&
+    (!Number.isInteger(perMinuteCap) ||
+      perMinuteCap < latePerMinuteMaxMinutesPerDay.min ||
+      perMinuteCap > latePerMinuteMaxMinutesPerDay.max)
+  ) {
+    errors.push(
+      `The largest charged late minutes per day must be a whole number from ${latePerMinuteMaxMinutesPerDay.min} (no cap) to ${latePerMinuteMaxMinutesPerDay.max}.`
+    );
+  }
+  if (mode === "per_minute" && basis === "fixed" && !(perMinuteAmount !== undefined && perMinuteAmount > 0)) {
+    errors.push("Enter the rupees deducted per late minute.");
+  }
+
   return {
     errors,
     value: {
@@ -2242,7 +2299,11 @@ function validatePayrollPolicyInput(body: any): { errors: string[]; value: any }
       marksPerUnit,
       lopPerUnit,
       timezone: typeof timezone === "string" ? timezone.trim() : null,
-      maxBreak
+      maxBreak,
+      mode,
+      basis,
+      perMinuteAmount,
+      perMinuteCap
     }
   };
 }
@@ -2262,15 +2323,41 @@ async function handleAdminSavePayrollPolicy(employee: any, body: any): Promise<R
     }, 400);
   }
 
-  // Clients that do not send the allowed break keep the current value
+  // Older clients do not send the allowed break or the late-penalty option: keep the stored values
   let maxBreak = value.maxBreak;
-  if (maxBreak === undefined) {
+  let mode = value.mode;
+  let basis = value.basis;
+  let perMinuteAmount = value.perMinuteAmount;
+  let perMinuteCap = value.perMinuteCap;
+  if (
+    maxBreak === undefined ||
+    mode === undefined ||
+    basis === undefined ||
+    perMinuteAmount === undefined ||
+    perMinuteCap === undefined
+  ) {
     const { data: current } = await adminClient
       .from("payroll_policy")
-      .select("max_break_minutes")
+      .select(
+        "max_break_minutes, late_penalty_mode, late_per_minute_basis, late_per_minute_amount, late_per_minute_max_minutes_per_day"
+      )
       .eq("id", 1)
       .maybeSingle();
-    maxBreak = current?.max_break_minutes ?? 60;
+    maxBreak = maxBreak ?? current?.max_break_minutes ?? 60;
+    mode = mode ?? current?.late_penalty_mode ?? "marks";
+    basis = basis ?? current?.late_per_minute_basis ?? "pro_rata";
+    perMinuteAmount = perMinuteAmount ?? Number(current?.late_per_minute_amount ?? 0);
+    perMinuteCap = perMinuteCap ?? Number(current?.late_per_minute_max_minutes_per_day ?? 0);
+  }
+
+  // A flat per-minute deduction needs an amount, whether it arrived now or was stored earlier
+  if (mode === "per_minute" && basis === "fixed" && !(Number(perMinuteAmount) > 0)) {
+    return json({
+      success: false,
+      error: "invalid_payroll_policy",
+      message: "Enter the rupees deducted per late minute.",
+      errors: ["Enter the rupees deducted per late minute."]
+    }, 400);
   }
 
   const { data, error } = await adminClient.rpc(
@@ -2282,7 +2369,11 @@ async function handleAdminSavePayrollPolicy(employee: any, body: any): Promise<R
       p_late_marks_per_unit: value.marksPerUnit,
       p_late_lop_days_per_unit: value.lopPerUnit,
       p_office_timezone: value.timezone,
-      p_max_break_minutes: maxBreak
+      p_max_break_minutes: maxBreak,
+      p_late_penalty_mode: mode,
+      p_late_per_minute_basis: basis,
+      p_late_per_minute_amount: perMinuteAmount,
+      p_late_per_minute_max_minutes_per_day: perMinuteCap
     }
   );
 
@@ -2378,9 +2469,17 @@ function formatPayrollResult(r: any) {
     absenceAmount: num(r?.absence_amount),
     lopLeaveDays: num(r?.lop_leave_days),
     lopLeaveAmount: num(r?.lop_leave_amount),
+    latePenaltyMode: r?.late_penalty_mode ?? "marks",
     lateMarks: num(r?.late_marks),
     lateMarksPerUnit: num(r?.late_marks_per_unit),
     lateLopDaysPerUnit: num(r?.late_lop_days_per_unit),
+    lateMinutes: num(r?.late_minutes),
+    lateDaysCharged: num(r?.late_days_charged),
+    latePerMinuteBasis: r?.late_per_minute_basis ?? null,
+    latePerMinuteAmount: num(r?.late_per_minute_amount),
+    latePerMinuteRate: num(r?.late_per_minute_rate),
+    latePerMinuteMaxMinutesPerDay: num(r?.late_per_minute_max_minutes_per_day),
+    lateGraceMinutes: num(r?.late_grace_minutes),
     lateLopDays: num(r?.late_lop_days),
     lateAmount: num(r?.late_amount),
     totalLopDays: num(r?.total_lop_days),
@@ -2392,7 +2491,8 @@ function formatPayrollResult(r: any) {
       date: d.date,
       type: d.type,
       days: Number(d.days),
-      amount: Number(d.amount)
+      amount: Number(d.amount),
+      minutes: d.minutes === undefined || d.minutes === null ? null : Number(d.minutes)
     }))
   };
 }
@@ -4062,6 +4162,20 @@ async function handleApproveLeave(
       }, 404);
     }
 
+    // Only a pending request can be approved. Approving an already-decided one used to fall through to
+    // the direct-approval fallback below, which re-spent the balance and turned LOP days back into paid days.
+    const currentStatus = String(leaveReq.status ?? "").toLowerCase();
+    if (currentStatus !== "pending") {
+      return json({
+        success: false,
+        error: "leave_not_pending",
+        status: currentStatus,
+        message: currentStatus === "approved"
+          ? "This leave request has already been approved."
+          : `This leave request is ${currentStatus || "not pending"} and cannot be approved.`
+      }, 409);
+    }
+
     // Approving changes pay for the leave's dates: refuse while that payroll month is locked
     const lockedForApproval = await lockedPayrollMonth(String(leaveReq.from_date ?? "").slice(0, 10), String(leaveReq.to_date ?? leaveReq.from_date ?? "").slice(0, 10));
     if (lockedForApproval) return payrollLockedResponse(lockedForApproval);
@@ -4141,8 +4255,34 @@ async function handleApproveLeave(
       }
     }
 
-    const paidDays = canonicalType === "lop" ? 0 : daysCount;
-    const lopDays = canonicalType === "lop" ? daysCount : 0;
+    // Paid days can never exceed the balance left; the rest is loss of pay (same rule as
+    // approve_leave_request(), so the fallback can never pay for days the employee has not got).
+    let balanceRow: any = null;
+    if (canonicalType === "casual" || canonicalType === "sick") {
+      const { data } = await adminClient
+        .from("employee_leave_balances")
+        .select("*")
+        .eq("employee_id", leaveReq.employee_id)
+        .eq("leave_type", canonicalType)
+        .maybeSingle();
+      balanceRow = data ?? null;
+    }
+
+    let paidDays: number;
+    let lopDays: number;
+    if (canonicalType === "lop") {
+      paidDays = 0;
+      lopDays = daysCount;
+    } else {
+      const available = balanceRow
+        ? Math.max(0, Number(
+            balanceRow.balance_days ??
+            (Number(balanceRow.allocated_days ?? 0) + Number(balanceRow.adjusted_days ?? 0) - Number(balanceRow.used_days ?? 0))
+          ))
+        : daysCount;   // no balance row yet: one is created below with the usual allocation
+      paidDays = Math.min(daysCount, available);
+      lopDays = Math.round((daysCount - paidDays) * 100) / 100;
+    }
 
     const { data: updatedLeave, error: leaveUpdateErr } = await adminClient
       .from("leaves")
@@ -4171,12 +4311,7 @@ async function handleApproveLeave(
     // Update employee_leave_balances only for paid leave ('casual' or 'sick')
     if (canonicalType === "casual" || canonicalType === "sick") {
       try {
-        const { data: existingBal } = await adminClient
-          .from("employee_leave_balances")
-          .select("*")
-          .eq("employee_id", leaveReq.employee_id)
-          .eq("leave_type", canonicalType)
-          .maybeSingle();
+        const existingBal = balanceRow;
 
         if (existingBal) {
           const newUsed = Number(existingBal.used_days ?? 0) + paidDays;

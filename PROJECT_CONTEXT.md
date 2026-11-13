@@ -236,11 +236,11 @@ All application endpoints are consolidated into a single Supabase Edge Function:
 | `official_public_holidays` | `id` (UUID), `holiday_code`, `holiday_name`, `holiday_date` (DATE), `holiday_type` | Statutory gazetted holidays cache. |
 | `office_geofence_settings` | `id` (=1), `latitude`, `longitude`, `radius_m`, `is_active`, `max_accuracy_m`, `max_location_age_s`, `updated_by`, `updated_at` | Single row. Written only via `save_office_geofence_settings` (service role). Admin-only `SELECT`. |
 | `office_geofence_settings_history` | `id`, settings snapshot, `changed_by`, `changed_at` | One row per admin save. |
-| `payroll_policy` | `id` (=1), `week_off_days` (0=Sun…6=Sat), `late_grace_minutes`, `late_marks_per_unit`, `late_lop_days_per_unit`, `office_timezone`, `updated_by` | Single row; history in `payroll_policy_history`. Written only via `save_payroll_policy` (service role). Admin-only `SELECT`. |
+| `payroll_policy` | `id` (=1), `week_off_days` (0=Sun…6=Sat), `late_grace_minutes`, `late_penalty_mode` (`marks` \| `per_minute`), `late_marks_per_unit`, `late_lop_days_per_unit`, `late_per_minute_basis` (`pro_rata` \| `fixed`), `late_per_minute_amount`, `late_per_minute_max_minutes_per_day`, `office_timezone`, `max_break_minutes`, `updated_by` | Single row; history in `payroll_policy_history`. Written only via `save_payroll_policy` (service role). Admin-only `SELECT`. The late-penalty option decides how late check-ins are priced (§4.4). |
 | `salary_structures` | `employee_id`, `monthly_gross`, `effective_from`, `note`, `created_by`, `created_at` | Never edited or deleted; the latest row on or before a date applies. Written only via `add_salary_structure`. Employees see own rows, admins all. |
 | `payroll_runs` / `payroll_run_events` | `month`, `status` (`open`/`locked`), `current_version`; events: `event`, `version`, `reason`, `actor` | One row per month; every lock/reopen is logged. |
 | `payslips` | `employee_id`, `month`, `version`, `payslip_number`, `net_pay`, `snapshot` (jsonb) | Never edited; employees see their current version for locked months only. Blocks employee deletion. |
-| `attendance_late_marks` | `attendance_id`, `employee_id`, `attendance_date`, `is_late`, `minutes_late`, `reason`, shift snapshot | Written by the `attendance_late_mark` trigger; also sets `attendance.status` to `late` / `present`. Employees see own rows, admins all. |
+| `attendance_late_marks` | `attendance_id`, `employee_id`, `attendance_date`, `is_late`, `minutes_late`, `reason`, shift snapshot (`shift_id`, `shift_start_time`, `shift_working_minutes`, `grace_minutes`, `office_timezone`) | Written by the `attendance_late_mark` trigger; also sets `attendance.status` to `late` / `present`. The shift snapshot freezes the rules of that day, so later shift, grace or option changes never re-price past days. Employees see own rows, admins all. |
 | `attendance_location_events` | `id`, `employee_id`, `attendance_id`, `action`, `outcome`, `reason_code`, `location_status`, coordinates, `accuracy_m`, `distance_m`, `received_at` | Location evidence for every attendance action. Employees see own rows, admins all; writes service role only. |
 
 ### 4.2. Action Dispatcher Reference
@@ -284,8 +284,8 @@ The Edge Function inspects `{ "action": "<action_name>", ... }` in the POST body
 | `admin_payroll_lock` / `admin_payroll_reopen` | Admin | Lock a finished month (issues payslips) / reopen it with a reason. |
 | `payslip_list` / `payslip_get` | Authenticated | Employee's own payslips for locked months (current version). |
 | `admin_payslip_get` | Admin | Any employee's payslip for a month (optional `version`). |
-| `admin_payroll_policy` | Admin | Returns payroll settings (week-off days, late grace/conversion, office timezone) and change history. |
-| `admin_save_payroll_policy` | Admin | Validates and saves payroll settings. |
+| `admin_payroll_policy` | Admin | Returns payroll settings (week-off days, late grace, late-penalty option, office timezone, allowed break) and change history. |
+| `admin_save_payroll_policy` | Admin | Validates and saves payroll settings, including the late-penalty option (`latePenaltyMode`, `latePerMinuteBasis`, `latePerMinuteAmount`, `latePerMinuteMaxMinutesPerDay`). Fields a client leaves out keep their stored value. |
 | `notifications_list` / `notifications_mark_read` | Employee (own), admin feed with `audience: "admin"` | Notification inbox and read state. |
 | `device_register` / `device_unregister` | Employee | Push token of the signed-in phone. |
 | `notifications_dispatch` | pg_cron only (`x-skytrack-dispatch-secret`) | Sends pending pushes through Firebase. |
@@ -302,7 +302,13 @@ Planned on branch `feature/payroll` (built on `feature/office-geofencing`). **Ph
 attendance "today" uses the UTC date everywhere, times are displayed in the viewer's local timezone, late marks are
 decided from each employee's shift by the `attendance_late_mark` trigger (stored in `attendance_late_marks`, past
 days never re-evaluated after shift/setting changes), and admins edit `payroll_policy` on the **Payroll Settings**
-page. **Phase 1 is implemented** too: admins set salaries in Employee Details → Salary (`salary_structures`, effective-dated
+page. Admins also choose **how late check-ins affect pay**: *option 1* — every `late_marks_per_unit` late marks cost
+`late_lop_days_per_unit` days (the default, 2 marks = 0.5 day LOP) — or *option 2* — every minute after the shift
+start (beyond the grace) is deducted, priced either pro-rata from the salary and the shift length
+(`per_day_rate ÷ shift working minutes`) or at a flat rupee amount, with an optional daily minute limit and never
+more than that day's own pay (migration `20261113000000_late_penalty_per_minute.sql`). Switching the option
+re-prices open months on the next calculation and never alters the recorded late marks; locked months keep their
+payslips. **Phase 1 is implemented** too: admins set salaries in Employee Details → Salary (`salary_structures`, effective-dated
 history), `compute_payroll()` calculates working days, absences, LOP leave and late-mark deductions, employees see a
 hidden "This month's salary" card (web Home and Android Home), and admins see all employees on the **Payroll** page.
 **Phase 2 is implemented** as well: admins lock a finished month on the Payroll page (frozen, versioned `payslips`),

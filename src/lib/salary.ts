@@ -1,4 +1,4 @@
-import type { SalarySummary } from './api'
+import type { LatePenaltyMode, LatePerMinuteBasis, SalarySummary } from './api'
 
 const FLAG_LABELS: Record<string, string> = {
   joining_date_missing: 'Joining date not set — the whole month is counted.',
@@ -34,4 +34,62 @@ export function formatDays(days?: number | null): string {
 
 export function currentUtcMonth(): string {
   return new Date().toISOString().slice(0, 7)
+}
+
+/** Rupees with up to two decimals, for per-minute rates that are smaller than a rupee. */
+function formatMinuteRate(value: number): string {
+  return `₹${value.toFixed(2)}`
+}
+
+export function formatMinutes(minutes?: number | null): string {
+  const m = Math.max(0, Math.round(minutes ?? 0))
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60)
+  const rest = m % 60
+  return rest === 0 ? `${h} hr` : `${h} hr ${rest} min`
+}
+
+/**
+ * The detail line under "Late check-ins" on the salary breakdown, the employee card and the payslip.
+ * Option 1 counts groups of late marks; option 2 charges every late minute.
+ */
+export function lateDeductionDetail(salary: SalarySummary): string {
+  const marks = salary.lateMarks ?? 0
+  if (salary.latePenaltyMode === 'per_minute') {
+    const rate =
+      salary.latePerMinuteBasis === 'fixed' && salary.latePerMinuteAmount
+        ? `${formatMinuteRate(salary.latePerMinuteAmount)}/min`
+        : salary.latePerMinuteRate
+          ? `${formatMinuteRate(salary.latePerMinuteRate)}/min`
+          : 'per minute'
+    return `${formatMinutes(salary.lateMinutes)} late over ${marks} day${marks === 1 ? '' : 's'} · ${rate}`
+  }
+  const rule =
+    salary.lateMarksPerUnit && salary.lateLopDaysPerUnit
+      ? ` (${salary.lateMarksPerUnit} = ${formatDays(salary.lateLopDaysPerUnit)} day)`
+      : ''
+  return `${marks} late mark${marks === 1 ? '' : 's'}${rule} → ${formatDays(salary.lateLopDays)} day`
+}
+
+/** One line describing the late-penalty rule in force, for settings screens and confirmations. */
+export function latePolicySummary(policy: {
+  latePenaltyMode: LatePenaltyMode
+  latePerMinuteBasis: LatePerMinuteBasis
+  latePerMinuteAmount: number
+  latePerMinuteMaxMinutesPerDay: number
+  lateMarksPerUnit: number
+  lateLopDaysPerUnit: number
+}): string {
+  if (policy.latePenaltyMode === 'per_minute') {
+    const rate =
+      policy.latePerMinuteBasis === 'fixed'
+        ? `${formatMinuteRate(policy.latePerMinuteAmount)} per late minute`
+        : "each late minute costs that minute's share of the day's pay"
+    const cap =
+      policy.latePerMinuteMaxMinutesPerDay > 0
+        ? `, up to ${formatMinutes(policy.latePerMinuteMaxMinutesPerDay)} a day`
+        : ''
+    return `Per minute — ${rate}${cap}`
+  }
+  return `Late marks — ${policy.lateMarksPerUnit} marks = ${formatDays(policy.lateLopDaysPerUnit)} day LOP`
 }

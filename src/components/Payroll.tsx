@@ -9,7 +9,7 @@ import {
   type PayrollMonthRow,
   type PayrollRunInfo,
 } from '../lib/api'
-import { currentUtcMonth, formatDays, salaryFlagLabel, salaryStatusMessage } from '../lib/salary'
+import { currentUtcMonth, formatDays, formatMinutes, salaryFlagLabel, salaryStatusMessage } from '../lib/salary'
 import { openEmployeeScreen } from '../lib/navigation'
 import { ShortcutArrow } from './ShortcutArrow'
 import { downloadPayslipPdf } from '../lib/payslipPdf'
@@ -42,8 +42,8 @@ function csvCell(value: unknown): string {
 function exportCsv(month: string, run: PayrollRunInfo, rows: PayrollMonthRow[]) {
   const header = [
     'Employee ID', 'Name', 'Designation', 'Month', 'Payslip number', 'Version', 'Monthly gross', 'Working days',
-    'Paid days', 'Absence days', 'Absence amount', 'LOP leave days', 'LOP leave amount', 'Late marks',
-    'Late LOP days', 'Late amount', 'Total deductions', 'Net pay', 'Status',
+    'Paid days', 'Absence days', 'Absence amount', 'LOP leave days', 'LOP leave amount', 'Late penalty option',
+    'Late days', 'Late minutes charged', 'Late LOP days', 'Late amount', 'Total deductions', 'Net pay', 'Status',
   ]
   const lines = rows.map(({ employee, salary, payslip }) => {
     const ok = salary.status === 'ok'
@@ -52,7 +52,9 @@ function exportCsv(month: string, run: PayrollRunInfo, rows: PayrollMonthRow[]) 
       employee.employeeId, employee.name, employee.designation ?? '', month, payslip?.payslipNumber ?? '', payslip?.version ?? '',
       ok ? salary.monthlyGross : '', ok ? salary.workingDaysInMonth : '', paidDays,
       ok ? salary.absenceDays : '', ok ? salary.absenceAmount : '', ok ? salary.lopLeaveDays : '', ok ? salary.lopLeaveAmount : '',
-      ok ? salary.lateMarks : '', ok ? salary.lateLopDays : '', ok ? salary.lateAmount : '',
+      ok ? (salary.latePenaltyMode === 'per_minute' ? 'Per minute' : 'Late marks') : '',
+      ok ? salary.lateMarks : '', ok ? (salary.latePenaltyMode === 'per_minute' ? salary.lateMinutes : '') : '',
+      ok ? salary.lateLopDays : '', ok ? salary.lateAmount : '',
       ok ? salary.totalDeductions : '', ok ? salary.netPay : '', ok ? 'Payslip issued' : (salaryStatusMessage(salary) ?? salary.status),
     ].map(csvCell).join(',')
   })
@@ -347,7 +349,7 @@ export function Payroll() {
                     <th className="py-2.5 px-3 font-bold text-right">Working days</th>
                     <th className="py-2.5 px-3 font-bold text-right">Absent</th>
                     <th className="py-2.5 px-3 font-bold text-right">LOP leave</th>
-                    <th className="py-2.5 px-3 font-bold text-right">Late marks</th>
+                    <th className="py-2.5 px-3 font-bold text-right">Late days</th>
                     <th className="py-2.5 px-3 font-bold text-right">Deductions</th>
                     <th className="py-2.5 px-3 font-bold text-right">{isLocked ? 'Net pay' : 'Expected net'}</th>
                     {isLocked && <th className="py-2.5 px-3 font-bold text-right">Payslip</th>}
@@ -409,7 +411,9 @@ export function Payroll() {
                                 )}
                                 <span>
                                   {salary.lateMarks ?? 0}
-                                  {salary.lateLopDays ? <span className="text-[11px] text-slate-400"> ({formatDays(salary.lateLopDays)} d)</span> : null}
+                                  {salary.latePenaltyMode === 'per_minute'
+                                    ? (salary.lateMinutes ? <span className="text-[11px] text-slate-400"> ({formatMinutes(salary.lateMinutes)})</span> : null)
+                                    : (salary.lateLopDays ? <span className="text-[11px] text-slate-400"> ({formatDays(salary.lateLopDays)} d)</span> : null)}
                                 </span>
                               </span>
                             </td>
