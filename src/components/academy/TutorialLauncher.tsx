@@ -1,4 +1,5 @@
 import type { AcademyArticle } from '../../lib/academy'
+import { tutorialForArticle } from './simulator/scenarios'
 
 interface TutorialLauncherProps {
   article: AcademyArticle
@@ -6,15 +7,13 @@ interface TutorialLauncherProps {
 }
 
 /**
- * Entry point to the interactive tutorial for an article.
- *
- * The tutorial engine is Phase 4. Until it exists this announces the tutorial and stays disabled
- * rather than opening something that cannot run — the Academy's own rule is never to offer what
- * the reader cannot use.
+ * Entry point to the interactive tutorial for an article. An article may reserve a tutorial id
+ * before the walkthrough is written, so the button only becomes live once a definition exists —
+ * the Academy's rule is never to offer what the reader cannot use.
  */
 export function TutorialLauncher({ article, onLaunch }: TutorialLauncherProps) {
   if (!article.tutorialId) return null
-  const available = Boolean(onLaunch)
+  const available = Boolean(onLaunch) && Boolean(tutorialForArticle(article.id))
 
   return (
     <section className="mt-6 rounded-2xl border border-red-100 bg-red-50/60 p-4 flex items-start gap-3.5">

@@ -13,6 +13,8 @@ import { RelatedArticles } from './RelatedArticles'
 import { TutorialLauncher } from './TutorialLauncher'
 import { FeedbackWidget } from './FeedbackWidget'
 import { AssistantLauncher } from './AssistantLauncher'
+import { TutorialPlayer } from './simulator/engine/TutorialPlayer'
+import { tutorialForArticle } from './simulator/scenarios'
 
 interface AcademyProps {
   /** Opens a specific article on mount, e.g. from contextual help */
@@ -35,6 +37,7 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
 
   const [articleId, setArticleId] = useState<string | null>(initialArticleId)
   const [category, setCategory] = useState<AcademyCategory | null>(null)
+  const [tutorialArticleId, setTutorialArticleId] = useState<string | null>(null)
 
   const article: AcademyArticle | null = articleId ? (ARTICLES_BY_ID.get(articleId) ?? null) : null
   const categories = useMemo(() => categoriesForRole(role), [role])
@@ -52,8 +55,11 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
 
   const openArticle = useCallback((id: string) => {
     setArticleId(id)
+    setTutorialArticleId(null)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
+
+  const runningTutorial = tutorialArticleId ? tutorialForArticle(tutorialArticleId) : null
 
   const goHome = useCallback(() => { setArticleId(null); setCategory(null) }, [])
   const openCategory = useCallback((c: AcademyCategory) => { setCategory(c); setArticleId(null) }, [])
@@ -106,6 +112,10 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
             />
           ) : article ? (
             <article className="glass-panel rounded-2xl border border-slate-200/70 p-5 sm:p-7">
+              {runningTutorial ? (
+                <TutorialPlayer definition={runningTutorial} onExit={() => setTutorialArticleId(null)} />
+              ) : (
+              <>
               <AcademyHeader
                 role={role}
                 category={article.category}
@@ -115,12 +125,14 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
                 onOpenArticle={openArticle}
               />
               <ArticleRenderer markdown={article.body} onOpenArticle={openArticle} />
-              <TutorialLauncher article={article} />
+              <TutorialLauncher article={article} onLaunch={() => setTutorialArticleId(article.id)} />
               <RelatedArticles article={article} role={role} onOpenArticle={openArticle} />
               <FeedbackWidget articleId={article.id} />
               <p className="mt-6 text-[11px] text-slate-400">
                 Last updated {article.lastUpdated} · version {article.docVersion}
               </p>
+              </>
+              )}
             </article>
           ) : category ? (
             <section className="glass-panel rounded-2xl border border-slate-200/70 p-5 sm:p-7">
