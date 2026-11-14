@@ -98,7 +98,11 @@
         "deduction",
         "less salary",
         "money deducted",
-        "why less pay"
+        "why less pay",
+        "salary cut",
+        "pay cut",
+        "salary reduced",
+        "salary deduction"
       ],
       "article": "payroll.concepts.deductions"
     },
@@ -221,6 +225,17 @@
         "not getting reminders"
       ],
       "article": "troubleshooting.notifications.not-arriving"
+    },
+    {
+      "intent": "unpaid leave deduction",
+      "phrases": [
+        "lop",
+        "loss of pay",
+        "unpaid leave",
+        "leave without pay",
+        "salary cut for leave"
+      ],
+      "article": "payroll.deductions.lop-leave"
     }
   ],
   "error_code_map": {

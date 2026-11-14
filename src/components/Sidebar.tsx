@@ -24,6 +24,8 @@ export function Sidebar({ activeTab, onSelectTab, isOpen, onClose }: SidebarProp
     { id: 'payroll', label: 'Payroll', icon: 'account_balance_wallet' },
     { id: 'payroll-settings', label: 'Payroll Settings', icon: 'tune' },
     ...(isSuperAdmin ? [{ id: 'admin-management', label: 'Admin Management', icon: 'admin_panel_settings' }] : []),
+    // Training is not a daily operational task, so it sits last rather than competing with Attendance.
+    { id: 'academy', label: 'Help & Training', icon: 'school' },
   ]
 
   return (

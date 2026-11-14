@@ -20,6 +20,7 @@ export function EmployeeSidebar({ activeTab, onSelectTab, isOpen, onClose }: Emp
     { id: 'monthly', label: 'Monthly Overview', icon: 'calendar_month' },
     { id: 'holidays', label: 'Public Holidays', icon: 'event_available' },
     { id: 'profile', label: 'My Account', icon: 'person' },
+    { id: 'academy', label: 'Help & Training', icon: 'school' },
   ]
 
   return (

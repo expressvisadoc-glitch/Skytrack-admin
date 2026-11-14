@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { Header } from './components/Header'
 import { Dashboard } from './components/Dashboard'
@@ -10,6 +10,8 @@ import { Settings } from './components/Settings'
 import { Organization } from './components/Organization'
 import { Login } from './components/Login'
 import { ProtectedRoute } from './components/ProtectedRoute'
+import { SkeletonPage } from './components/Skeleton'
+const Academy = lazy(() => import('./components/academy/Academy').then((m) => ({ default: m.Academy })))
 import { AdminManagement } from './components/AdminManagement'
 import { OfficeGeofence } from './components/OfficeGeofence'
 import { PayrollSettings } from './components/PayrollSettings'
@@ -54,10 +56,12 @@ function getInitialTab(isAdmin: boolean): string {
   const path = window.location.pathname.replace(/^\/+/, '').split('/')[0]
   if (isAdmin) {
     if (!path || path === 'login' || path === 'home') return 'dashboard'
+    if (path === 'academy' || path === 'help') return 'academy'
     if (path === 'leaves') return 'leave-management'
     return VALID_ADMIN_TABS.includes(path) ? path : 'dashboard'
   } else {
     if (!path || path === 'login' || path === 'dashboard') return 'home'
+    if (path === 'academy' || path === 'help') return 'academy'
     if (path === 'leaves' || path === 'leave-management') return 'leave'
     if (path === 'public-holidays') return 'holidays'
     return VALID_EMPLOYEE_TABS.includes(path) ? path : 'home'
@@ -147,6 +151,8 @@ function App() {
               <Payroll />
             ) : activeTab === 'payroll-settings' ? (
               <PayrollSettings />
+            ) : activeTab === 'academy' ? (
+              <Suspense fallback={<SkeletonPage cards={2} />}><Academy /></Suspense>
             ) : activeTab === 'admin-management' ? (
               <AdminManagement />
             ) : (
@@ -200,6 +206,8 @@ function App() {
             <EmployeeMonthly />
           ) : activeTab === 'holidays' ? (
             <EmployeeHolidays />
+          ) : activeTab === 'academy' ? (
+            <Suspense fallback={<SkeletonPage cards={2} />}><Academy /></Suspense>
           ) : activeTab === 'profile' ? (
             <EmployeeProfile />
           ) : (
