@@ -37,6 +37,8 @@ export interface AcademyArticle {
   body: string
   /** Lower-cased body, built once for search */
   searchText: string
+  /** Body prose only - no headings, banners, tables or code - for excerpts */
+  prose: string
 }
 
 export const CATEGORY_META: Record<AcademyCategory, { label: string; icon: string; blurb: string }> = {
@@ -124,6 +126,27 @@ const asList = (v: string | string[] | undefined): string[] =>
 const asText = (v: string | string[] | undefined): string =>
   Array.isArray(v) ? (v[0] ?? '') : (v ?? '')
 
+/**
+ * The readable sentences of an article: drops headings (they repeat the title), blockquotes (the
+ * availability banner), tables, code fences and list markers, and unwraps inline markdown.
+ */
+function toProse(body: string): string {
+  const out: string[] = []
+  let inCode = false
+  for (const raw of body.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (line.startsWith('```')) { inCode = !inCode; continue }
+    if (inCode || !line) continue
+    if (/^(#{1,6}\s|>|\||---+$)/.test(line)) continue
+    out.push(line.replace(/^(\d+\.|[-*])\s+/, ''))
+  }
+  return out.join(' ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 // --- load --------------------------------------------------------------------------------------
 
 // macOS writes AppleDouble "._" siblings on this volume; they are not articles.
@@ -163,6 +186,7 @@ function buildArticles(): AcademyArticle[] {
       tutorialId: asText(meta['tutorial.tutorial_id']) || null,
       body,
       searchText: body.toLowerCase(),
+      prose: toProse(body),
     })
   }
   return out.sort((a, b) => a.id.localeCompare(b.id))
@@ -221,12 +245,39 @@ export function articleForErrorCode(code: string): AcademyArticle | null {
   return id ? (ARTICLES_BY_ID.get(id) ?? null) : null
 }
 
-function excerptAround(body: string, needle: string): string | null {
-  const i = body.toLowerCase().indexOf(needle)
-  if (i < 0) return null
-  const start = Math.max(0, i - 60)
-  const text = body.slice(start, i + needle.length + 90).replace(/[#>*`|\-\n]+/g, ' ').replace(/\s+/g, ' ').trim()
-  return (start > 0 ? '…' : '') + text + '…'
+/** Strips one common English suffix so "approve" also finds approval, approved and approving. */
+function stem(term: string): string {
+  if (term.length <= 4) return term
+  const stripped = term.replace(/(ings|ing|ions|ion|ed|es|al|s|e)$/, '')
+  return stripped.length >= 4 ? stripped : term
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Matches a term only at the START of a word. Plain substring matching made "approve" hit
+ * "unapproved", ranking the absence guide for a query about approving leave.
+ */
+function wordPattern(term: string): RegExp {
+  const parts = term.split(/\s+/).filter(Boolean).map((t) => escapeRegExp(stem(t)))
+  return new RegExp(`(^|[^a-z0-9])${parts.join('[a-z]*\\s+')}`, 'i')
+}
+
+/**
+ * A readable excerpt for a body-only match: taken from prose (never a heading or the availability
+ * banner) and snapped to whole words at both ends.
+ */
+function excerptAround(prose: string, term: string): string | null {
+  const m = wordPattern(term).exec(prose)
+  if (!m) return null
+  const at = m.index + m[1].length
+  let start = Math.max(0, at - 50)
+  let end = Math.min(prose.length, at + 110)
+  if (start > 0) { const sp = prose.indexOf(' ', start); start = sp >= 0 && sp < at ? sp + 1 : start }
+  if (end < prose.length) { const sp = prose.lastIndexOf(' ', end); end = sp > at ? sp : end }
+  return (start > 0 ? '…' : '') + prose.slice(start, end).trim() + (end < prose.length ? '…' : '')
 }
 
 /**
@@ -237,45 +288,71 @@ function excerptAround(body: string, needle: string): string | null {
 export function searchArticles(query: string, role: AcademyRole): SearchHit[] {
   const q = query.trim().toLowerCase()
   if (q.length < 2) return []
-  const terms = q.split(/\s+/).filter(Boolean)
+  const terms = q.split(/\s+/).filter((t) => t.length >= 2)
   const pool = visibleArticles(role)
+  const phrase = wordPattern(q)
+  const termPatterns = terms.map(wordPattern)
 
   // Curated intents win: they map how people actually speak onto the right article.
   const intentBoost = new Map<string, number>()
   for (const intent of INTENTS) {
     const phrases = [intent.intent, ...intent.phrases].map((p) => p.toLowerCase())
     const exact = phrases.some((p) => p === q)
-    const partial = phrases.some((p) => p.includes(q) || q.includes(p))
+    const partial = phrases.some((p) => phrase.test(p) || wordPattern(p).test(q))
     if (exact) intentBoost.set(intent.article, 400)
     else if (partial) intentBoost.set(intent.article, Math.max(intentBoost.get(intent.article) ?? 0, 180))
   }
 
+  // Someone asking a question usually needs what its answer links to as well. The author's
+  // related_articles are an editorial judgement of relevance, which beats a description that only
+  // happens to contain the words - "no approved leave" in the absence guide, for example.
+  const relatedBoost = new Map<string, number>()
+  for (const [id, boost] of intentBoost) {
+    if (boost < 400) continue
+    for (const rel of ARTICLES_BY_ID.get(id)?.relatedArticles ?? []) {
+      if (!intentBoost.has(rel)) relatedBoost.set(rel, 60)
+    }
+  }
+
   const hits: SearchHit[] = []
   for (const article of pool) {
-    let score = intentBoost.get(article.id) ?? 0
+    let score = (intentBoost.get(article.id) ?? 0) + (relatedBoost.get(article.id) ?? 0)
+    let metaMatch = score > 0
     const title = article.title.toLowerCase()
-    const description = article.description.toLowerCase()
-    const keywords = article.keywords.map((k) => k.toLowerCase())
-    const synonyms = article.synonyms.map((s) => s.toLowerCase())
-
-    if (title === q) score += 300
-    if (title.includes(q)) score += 120
-    if (keywords.some((k) => k === q)) score += 150
-    if (keywords.some((k) => k.includes(q))) score += 70
-    if (synonyms.some((s) => s.includes(q) || q.includes(s))) score += 90
-    if (description.includes(q)) score += 50
-    if (article.searchText.includes(q)) score += 25
-
-    for (const term of terms) {
-      if (title.includes(term)) score += 30
-      if (keywords.some((k) => k.includes(term))) score += 20
-      if (synonyms.some((s) => s.includes(term))) score += 15
-      if (description.includes(term)) score += 10
-      if (article.searchText.includes(term)) score += 4
+    const fields = {
+      keywords: article.keywords.map((k) => k.toLowerCase()),
+      synonyms: article.synonyms.map((t) => t.toLowerCase()),
+      description: article.description.toLowerCase(),
     }
 
+    if (title === q) { score += 300; metaMatch = true }
+    if (phrase.test(title)) { score += 120; metaMatch = true }
+    if (fields.keywords.some((k) => k === q)) { score += 150; metaMatch = true }
+    if (fields.keywords.some((k) => phrase.test(k))) { score += 70; metaMatch = true }
+    if (fields.synonyms.some((t) => phrase.test(t) || wordPattern(t).test(q))) { score += 90; metaMatch = true }
+    if (phrase.test(fields.description)) { score += 50; metaMatch = true }
+    if (phrase.test(article.prose)) score += 25
+
+    // Every term must appear somewhere for a multi-word query to count as relevant.
+    let termsFound = 0
+    for (const pattern of termPatterns) {
+      let found = false
+      if (pattern.test(title)) { score += 30; found = true; metaMatch = true }
+      if (fields.keywords.some((k) => pattern.test(k))) { score += 20; found = true; metaMatch = true }
+      if (fields.synonyms.some((t) => pattern.test(t))) { score += 15; found = true; metaMatch = true }
+      if (pattern.test(fields.description)) { score += 10; found = true; metaMatch = true }
+      if (pattern.test(article.prose)) { score += 4; found = true }
+      if (found) termsFound++
+    }
+    if (terms.length > 1 && termsFound < terms.length && !intentBoost.has(article.id)) score = Math.floor(score / 3)
+
     if (score > 0) {
-      hits.push({ article, score, excerpt: excerptAround(article.body, terms[0]) })
+      hits.push({
+        article,
+        score,
+        // When the title or metadata matched, the description says it best; otherwise show where.
+        excerpt: metaMatch ? null : excerptAround(article.prose, terms[0] ?? q),
+      })
     }
   }
 

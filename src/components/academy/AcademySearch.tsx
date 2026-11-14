@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { CATEGORY_META, searchArticles, suggestedSearches, type AcademyRole, type SearchHit } from '../../lib/academy'
 
 interface AcademySearchProps {
@@ -12,21 +13,59 @@ interface AcademySearchProps {
  * Searches titles, keywords, synonyms, descriptions and body text, plus the curated intent phrases
  * in metadata/intents.json — which is why "salary cut" finds the deductions article even though
  * neither word is in its title.
+ *
+ * The results panel is rendered in a portal. `glass-panel` applies backdrop-filter, which creates a
+ * stacking context, so a dropdown positioned inside one is trapped there and later siblings — the
+ * category cards — paint straight over it however high its z-index. Portalling to the body and
+ * positioning from the input's own rect escapes every stacking context and every overflow clip.
  */
 export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: AcademySearchProps) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [anchor, setAnchor] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null)
 
   const hits: SearchHit[] = useMemo(() => searchArticles(query, role), [query, role])
+  const showPanel = open && query.trim().length >= 2
   const suggestions = useMemo(() => suggestedSearches(role), [role])
 
   useEffect(() => { setActive(0) }, [query])
 
+  useLayoutEffect(() => {
+    if (!showPanel) { setAnchor(null); return }
+    const place = () => {
+      const el = inputRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const gap = 8
+      const below = window.innerHeight - r.bottom - gap - 12
+      const above = r.top - gap - 12
+      // Flip above the field when there is more room there (small screens, keyboard open).
+      const openUp = below < 200 && above > below
+      setAnchor({
+        top: openUp ? Math.max(12, r.top - gap) : r.bottom + gap,
+        left: Math.max(12, Math.min(r.left, window.innerWidth - r.width - 12)),
+        width: r.width,
+        maxHeight: Math.max(160, Math.min(openUp ? above : below, 416)),
+      })
+    }
+    place()
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [showPanel, hits.length])
+
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      const inField = containerRef.current?.contains(target)
+      const inPanel = (target as HTMLElement).closest?.('[data-academy-search-panel]')
+      if (!inField && !inPanel) setOpen(false)
     }
     document.addEventListener('mousedown', onClickOutside)
     return () => document.removeEventListener('mousedown', onClickOutside)
@@ -47,7 +86,6 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
   }
 
   const isHero = variant === 'hero'
-  const showPanel = open && query.trim().length >= 2
 
   return (
     <div ref={containerRef} className={`relative ${isHero ? 'w-full max-w-2xl' : 'w-full max-w-sm'}`}>
@@ -56,6 +94,7 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
           search
         </span>
         <input
+          ref={inputRef}
           type="search"
           role="combobox"
           aria-expanded={showPanel}
@@ -64,7 +103,7 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
           onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          placeholder={isHero ? 'Search the guides — try "salary cut" or "cannot check in"' : 'Search guides…'}
+          placeholder={isHero ? 'Search the guides…' : 'Search guides…'}
           className={`w-full rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 ${
             isHero ? 'h-13 pl-11 pr-4 py-3.5 text-[14px]' : 'h-10 pl-10 pr-3 text-[13px]'
           }`}
@@ -85,16 +124,18 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
         </div>
       )}
 
-      {showPanel && (
+      {showPanel && anchor && createPortal(
         <div
           id="academy-search-results"
+          data-academy-search-panel=""
           role="listbox"
-          className="absolute z-30 mt-2 w-full max-h-[26rem] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl"
+          style={{ top: anchor.top, left: anchor.left, width: anchor.width, maxHeight: anchor.maxHeight }}
+          className="fixed z-[70] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white shadow-2xl"
         >
           {hits.length === 0 ? (
             <div className="p-5 text-center">
               <span className="material-symbols-outlined text-[28px] text-slate-300">search_off</span>
-              <p className="text-[13px] font-semibold text-slate-700 mt-1">No guides match “{query}”</p>
+              <p className="text-[13px] font-semibold text-slate-700 mt-1 break-words">No guides match “{query}”</p>
               <p className="text-[11.5px] text-slate-400 mt-1">
                 Try a word you would use out loud, such as “late” or “payslip”.
               </p>
@@ -132,8 +173,10 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
               ))}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
+
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { TutorialEngine } from '../engine/TutorialEngine'
 import type { DemoLeave } from '../data/demo-data'
 import { DEMO_IDENTITIES } from '../data/demo-data'
@@ -64,23 +65,25 @@ export function MockApp({ engine }: MockProps) {
   return (
     <div className="relative flex h-full min-h-[30rem] bg-slate-50 rounded-xl overflow-hidden border border-slate-200 select-none">
       {/* Sidebar */}
-      <aside className="w-48 shrink-0 bg-white border-r border-slate-200 py-3 hidden sm:flex flex-col gap-0.5">
-        <div className="px-4 pb-3 mb-1 border-b border-slate-100">
-          <span className="text-[12px] font-extrabold tracking-tight text-slate-900">SkyTrack</span>
-          <span className="block text-[9.5px] font-bold uppercase tracking-wider text-red-500">Demo</span>
+      <aside className="w-14 sm:w-48 shrink-0 bg-white border-r border-slate-200 py-3 flex flex-col gap-0.5">
+        <div className="px-2 sm:px-4 pb-3 mb-1 border-b border-slate-100 text-center sm:text-left">
+          <span className="text-[12px] font-extrabold tracking-tight text-slate-900">
+            <span className="sm:hidden">ST</span><span className="hidden sm:inline">SkyTrack</span>
+          </span>
+          <span className="hidden sm:block text-[9.5px] font-bold uppercase tracking-wider text-red-500">Demo</span>
         </div>
         {NAV.map((item) => {
           const active = screen === 'leave_management' && item.id === 'nav_leave_management'
             || screen === 'dashboard' && item.id === 'nav_dashboard'
           return (
             <Target key={item.id} engine={engine} target={item.id} action="click"
-              className={`mx-2 px-2.5 py-2 rounded-lg flex items-center gap-2 text-[12px] font-semibold text-left ${
+              className={`mx-1.5 sm:mx-2 px-2 sm:px-2.5 py-2 rounded-lg flex items-center justify-center sm:justify-start gap-2 text-[12px] font-semibold text-left ${
                 active ? 'bg-red-50 text-red-700' : 'text-slate-600'
               }`}>
-              <span className="material-symbols-outlined text-[17px]">{item.icon}</span>
-              <span className="flex-1">{item.label}</span>
+              <span className="material-symbols-outlined text-[17px] shrink-0" title={item.label}>{item.icon}</span>
+              <span className="hidden sm:block flex-1">{item.label}</span>
               {item.badge && (
-                <span className="px-1.5 rounded-full bg-red-600 text-white text-[9.5px] font-bold">{item.badge}</span>
+                <span className="hidden sm:inline px-1.5 rounded-full bg-red-600 text-white text-[9.5px] font-bold">{item.badge}</span>
               )}
             </Target>
           )
@@ -280,25 +283,40 @@ function MockLeaveDetail({ engine, leave }: { engine: TutorialEngine; leave: Dem
   )
 }
 
+/**
+ * The comment step. It used to advance on blur, which gave the learner no visible way to continue
+ * and submitted the sample text if they merely tabbed away. Now an explicit button commits it;
+ * Enter does too.
+ */
 function MockCommentBox({ engine }: { engine: TutorialEngine }) {
   const live = engine.isInteractive('reject_comment_box')
   const step = engine.getStep()
+  const [text, setText] = useState('')
+  const commit = () => engine.attempt('reject_comment_box', 'input', text.trim() || step?.sampleInput)
+
   return (
-    <textarea
-      rows={2}
-      disabled={!live}
-      defaultValue=""
-      placeholder={live ? (step?.sampleInput ?? 'Explain your decision…') : 'Manager comment'}
-      onBlur={(e) => engine.attempt('reject_comment_box', 'input', e.target.value || step?.sampleInput)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault()
-          const el = e.target as HTMLTextAreaElement
-          engine.attempt('reject_comment_box', 'input', el.value || step?.sampleInput)
-        }
-      }}
-      className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-[12px] disabled:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-red-500"
-    />
+    <div className="flex flex-col gap-2">
+      <textarea
+        rows={2}
+        disabled={!live}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={live ? (step?.sampleInput ?? 'Explain your decision…') : 'Manager comment'}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit() }
+        }}
+        className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-[12px] disabled:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-red-500"
+      />
+      {live && (
+        <button
+          type="button"
+          onClick={commit}
+          className="self-end px-3.5 py-1.5 rounded-lg bg-slate-900 text-white text-[11.5px] font-bold cursor-pointer"
+        >
+          {text.trim() ? 'Add comment' : 'Use the suggested comment'}
+        </button>
+      )}
+    </div>
   )
 }
 

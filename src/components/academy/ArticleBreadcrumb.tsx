@@ -29,7 +29,7 @@ export function ArticleBreadcrumb({ category, title, onHome, onCategory }: Artic
       {title && (
         <>
           <span className="text-slate-300">/</span>
-          <span className="text-slate-700 truncate max-w-[22rem]">{title}</span>
+          <span className="text-slate-700 truncate max-w-[11rem] sm:max-w-[18rem] lg:max-w-[22rem]">{title}</span>
         </>
       )}
     </nav>

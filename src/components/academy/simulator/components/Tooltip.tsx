@@ -54,13 +54,20 @@ export function Tooltip({ step, progress, containerRef, onNext, onPrevious, onSk
       left: { top: top + r.height / 2 - ch / 2, left: left - cw - gap },
     }
 
-    const fits = (p: { top: number; left: number }) =>
-      p.top >= 8 && p.left >= 8 && p.top + ch <= c.height - 8 && p.left + cw <= c.width - 8
+    // Above/below only have to fit vertically - their horizontal position is clamped afterwards.
+    // Requiring a horizontal fit too failed EVERY placement on a phone, where the card is nearly as
+    // wide as the stage, and the fallback then clamped the card straight on top of its target.
+    const fitsVertically = (p: { top: number }) => p.top >= 8 && p.top + ch <= c.height - 8
+    const fitsHorizontally = (p: { left: number }) => p.left >= 8 && p.left + cw <= c.width - 8
+    const fits = (side: Exclude<TooltipPlacement, 'center'>) => {
+      const p = candidates[side]
+      return side === 'top' || side === 'bottom' ? fitsVertically(p) : fitsVertically(p) && fitsHorizontally(p)
+    }
 
     const order: Exclude<TooltipPlacement, 'center'>[] =
       [wanted as Exclude<TooltipPlacement, 'center'>, 'bottom', 'top', 'right', 'left']
 
-    const chosen = order.find((p) => fits(candidates[p])) ?? 'bottom'
+    const chosen = order.find((side) => fits(side)) ?? 'bottom'
     const p = candidates[chosen]
     setPos({
       top: Math.min(Math.max(8, p.top), Math.max(8, c.height - ch - 8)),
@@ -68,6 +75,15 @@ export function Tooltip({ step, progress, containerRef, onNext, onPrevious, onSk
       placement: chosen,
     })
   }, [step.id, step.target, step.placement, containerRef])
+
+  // Once positioned, make sure the instruction is actually on screen. 'nearest' leaves a desktop
+  // layout alone when it already fits, and only scrolls when the card would be cut off.
+  useLayoutEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      cardRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [pos.top, pos.left, step.id])
 
   const needsAction = !['explain', 'inspect', 'complete'].includes(step.action)
   const stepNumber = progress.done.length + 1
@@ -78,7 +94,7 @@ export function Tooltip({ step, progress, containerRef, onNext, onPrevious, onSk
       role="dialog"
       aria-live="polite"
       aria-label={step.instruction}
-      className="absolute z-40 w-[min(22rem,calc(100%-2rem))] rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 flex flex-col gap-2.5"
+      className="absolute z-40 scroll-mt-32 scroll-mb-6 w-[min(22rem,calc(100%-2rem))] rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 flex flex-col gap-2.5"
       style={{ top: pos.top, left: pos.left }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -100,7 +116,9 @@ export function Tooltip({ step, progress, containerRef, onNext, onPrevious, onSk
       {needsAction && (
         <p className="text-[11.5px] text-red-600 font-semibold flex items-center gap-1.5">
           <span className="material-symbols-outlined text-[15px]">touch_app</span>
-          {step.action === 'input' ? 'Type in the highlighted box' : 'Select the highlighted item to continue'}
+          {step.action === 'input'
+            ? 'Type in the highlighted box, then select Add comment'
+            : 'Select the highlighted item to continue'}
         </p>
       )}
 

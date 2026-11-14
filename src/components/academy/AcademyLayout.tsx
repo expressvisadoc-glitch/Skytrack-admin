@@ -20,8 +20,10 @@ export function AcademyLayout({
 }: AcademyLayoutProps) {
   return (
     <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 items-start">
-      <aside className="w-full lg:w-64 xl:w-72 shrink-0 lg:sticky lg:top-28">
-        <div className="glass-panel rounded-2xl border border-slate-200/70 p-3 max-h-[70vh] overflow-y-auto">
+      {/* On small screens the content comes first and the category list follows it; on wide
+          screens the list sits to the left as usual. */}
+      <aside className="order-last lg:order-first w-full lg:w-64 xl:w-72 shrink-0 lg:sticky lg:top-28">
+        <div className="glass-panel rounded-2xl border border-slate-200/70 p-3 max-h-[16rem] lg:max-h-[70vh] overflow-y-auto">
           <AcademySidebar
             role={role}
             activeCategory={activeCategory}
@@ -31,7 +33,7 @@ export function AcademyLayout({
           />
         </div>
       </aside>
-      <div className="flex-1 min-w-0 w-full">{children}</div>
+      <div className="order-first lg:order-last flex-1 min-w-0 w-full">{children}</div>
     </div>
   )
 }
