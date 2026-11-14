@@ -1,0 +1,240 @@
+{
+  "$comment": "Search intents: what a user types or asks, mapped to the article that answers it. Phrases are written the way staff actually speak, including the wrong words for a feature. Server error codes are included verbatim so the help drawer can be opened programmatically from a failed action.",
+  "generated": "2026-11-14",
+  "intents": [
+    {
+      "intent": "sign in",
+      "phrases": [
+        "log in",
+        "login",
+        "cannot sign in",
+        "wrong password",
+        "employee id"
+      ],
+      "article": "getting-started.signin"
+    },
+    {
+      "intent": "check in",
+      "phrases": [
+        "punch in",
+        "clock in",
+        "mark attendance",
+        "start work",
+        "attendance not marking"
+      ],
+      "article": "employee.attendance.checkin"
+    },
+    {
+      "intent": "check out",
+      "phrases": [
+        "punch out",
+        "clock out",
+        "end work",
+        "leaving office"
+      ],
+      "article": "employee.attendance.checkout"
+    },
+    {
+      "intent": "take a break",
+      "phrases": [
+        "lunch",
+        "break time",
+        "pause work",
+        "tea break"
+      ],
+      "article": "employee.break.start"
+    },
+    {
+      "intent": "end a break",
+      "phrases": [
+        "resume work",
+        "back from lunch",
+        "stop break"
+      ],
+      "article": "employee.break.end"
+    },
+    {
+      "intent": "apply for leave",
+      "phrases": [
+        "request leave",
+        "take a day off",
+        "casual leave",
+        "sick leave",
+        "holiday request"
+      ],
+      "article": "employee.leave.apply"
+    },
+    {
+      "intent": "leave balance",
+      "phrases": [
+        "how many leaves left",
+        "remaining leave",
+        "leave quota"
+      ],
+      "article": "employee.leave.balances"
+    },
+    {
+      "intent": "see my salary",
+      "phrases": [
+        "this month's salary",
+        "how much will I get",
+        "salary card",
+        "my pay"
+      ],
+      "article": "employee.salary.card"
+    },
+    {
+      "intent": "download payslip",
+      "phrases": [
+        "payslip",
+        "salary slip",
+        "pay slip pdf"
+      ],
+      "article": "employee.payslip.download"
+    },
+    {
+      "intent": "why was my pay cut",
+      "phrases": [
+        "deduction",
+        "less salary",
+        "money deducted",
+        "why less pay"
+      ],
+      "article": "payroll.concepts.deductions"
+    },
+    {
+      "intent": "late deduction",
+      "phrases": [
+        "coming late",
+        "late mark",
+        "late penalty",
+        "deduction for being late"
+      ],
+      "article": "payroll.deductions.late-marks"
+    },
+    {
+      "intent": "approve leave",
+      "phrases": [
+        "accept leave",
+        "leave approval",
+        "approve request"
+      ],
+      "article": "administrator.leave.approve"
+    },
+    {
+      "intent": "fix attendance",
+      "phrases": [
+        "wrong check in time",
+        "forgot to check in",
+        "correct attendance",
+        "manual attendance"
+      ],
+      "article": "administrator.attendance.manual"
+    },
+    {
+      "intent": "undo checkout",
+      "phrases": [
+        "checked out by mistake",
+        "reverse checkout"
+      ],
+      "article": "administrator.attendance.undo-checkout"
+    },
+    {
+      "intent": "set a salary",
+      "phrases": [
+        "add salary",
+        "change pay",
+        "employee salary"
+      ],
+      "article": "payroll.salary.set"
+    },
+    {
+      "intent": "close the month",
+      "phrases": [
+        "month end",
+        "lock payroll",
+        "finish payroll",
+        "issue payslips"
+      ],
+      "article": "payroll.month.lock"
+    },
+    {
+      "intent": "reopen a month",
+      "phrases": [
+        "unlock payroll",
+        "correct a closed month",
+        "payroll locked"
+      ],
+      "article": "payroll.month.reopen"
+    },
+    {
+      "intent": "configure the office location",
+      "phrases": [
+        "geofence",
+        "office radius",
+        "set office location",
+        "where staff can check in"
+      ],
+      "article": "administrator.geofence.configure"
+    },
+    {
+      "intent": "choose a late penalty",
+      "phrases": [
+        "late policy",
+        "per minute deduction",
+        "late marks setting"
+      ],
+      "article": "payroll.policy.choose-option"
+    },
+    {
+      "intent": "declare a holiday",
+      "phrases": [
+        "add holiday",
+        "public holiday",
+        "company holiday"
+      ],
+      "article": "administrator.holidays.declare"
+    },
+    {
+      "intent": "add an employee",
+      "phrases": [
+        "new joiner",
+        "create employee",
+        "onboard staff"
+      ],
+      "article": "administrator.employees.add"
+    },
+    {
+      "intent": "reset someone's password",
+      "phrases": [
+        "forgot password",
+        "password reset",
+        "employee locked out"
+      ],
+      "article": "administrator.superadmin.password-reset"
+    },
+    {
+      "intent": "notifications not arriving",
+      "phrases": [
+        "no alerts",
+        "push not working",
+        "not getting reminders"
+      ],
+      "article": "troubleshooting.notifications.not-arriving"
+    }
+  ],
+  "error_code_map": {
+    "$comment": "Server error codes verified in QA. The help drawer can open the matching article directly from a failed request.",
+    "outside_geofence": "troubleshooting.checkin.outside-geofence",
+    "location_accuracy_too_low": "troubleshooting.checkin.accuracy",
+    "location_required": "troubleshooting.checkin.location-permission",
+    "invalid_location": "troubleshooting.checkin.gps-off",
+    "location_stale": "troubleshooting.checkin.accuracy",
+    "location_timestamp_invalid": "troubleshooting.checkin.device-clock",
+    "mock_location_detected": "troubleshooting.checkin.mock-location",
+    "geofence_not_configured": "administrator.geofence.configure",
+    "payroll_month_locked": "troubleshooting.payroll.month-locked",
+    "leave_not_pending": "troubleshooting.leave.already-approved",
+    "forbidden": "troubleshooting.permission.denied"
+  }
+}

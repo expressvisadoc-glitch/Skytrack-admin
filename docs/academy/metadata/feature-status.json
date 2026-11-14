@@ -1,0 +1,63 @@
+{
+  "$comment": "Verified in Phase 0 against source and the staging database, 2026-11-14. 'live' = present in the production build (web from main) and the released Android app. 'branch_only' = complete and staging-tested on the production branch, not yet deployed. Academy articles for a feature that is not 'live' must not be published to production users.",
+  "generated": "2026-11-14",
+  "audited_branch": "ddev/tutorial",
+  "features": {
+    "attendance": {
+      "status": "live",
+      "label": "Attendance",
+      "evidence": "Attendance.tsx, EmployeeHome.tsx on main; actions start_work/end_work/attendance_today"
+    },
+    "breaks": {
+      "status": "live",
+      "label": "Break management",
+      "evidence": "start_break, resume_work/end_break on main",
+      "caveat": "No per-break records exist; attendance_breaks is empty and unwritten"
+    },
+    "leave_management": {
+      "status": "live",
+      "label": "Leave management",
+      "evidence": "LeaveManagement.tsx, EmployeeLeaves.tsx on main"
+    },
+    "holidays": {
+      "status": "live",
+      "label": "Holiday calendar",
+      "evidence": "PublicHolidays.tsx, EmployeeHolidays.tsx on main"
+    },
+    "employee_admin": {
+      "status": "live",
+      "label": "Employee and organisation administration",
+      "evidence": "Employees.tsx, EmployeeDetails.tsx, Organization.tsx, AdminManagement.tsx on main"
+    },
+    "geofencing": {
+      "status": "branch_only",
+      "label": "Geofenced check-in",
+      "evidence": "OfficeGeofence.tsx absent from main; migration 20261025000000 not applied to production",
+      "blocker": "Mock-location detection is client-asserted (QA finding C-1)"
+    },
+    "payroll": {
+      "status": "branch_only",
+      "label": "Payroll and salary",
+      "evidence": "Payroll.tsx and PayrollSettings.tsx absent from main"
+    },
+    "payslips": {
+      "status": "branch_only",
+      "label": "Payslips",
+      "evidence": "EmployeePayslips.tsx absent from main"
+    },
+    "notifications": {
+      "status": "branch_only",
+      "label": "Notifications",
+      "evidence": "notifications table and FCM dispatch on branch only",
+      "caveat": "The production bell is a different component showing leave requests and a punch feed",
+      "blocker": "Release builds ship a blank Firebase app id, so push cannot work in production (QA finding H-1)"
+    },
+    "checkin_security": {
+      "status": "built_disabled",
+      "label": "Device-bound check-in",
+      "evidence": "Stashed WIP on security/checkIn; all rules default to off"
+    },
+    "subscriptions": { "status": "planned", "label": "Multi-organisation subscriptions" },
+    "sheets_export": { "status": "planned", "label": "Google Sheets monthly archive" }
+  }
+}

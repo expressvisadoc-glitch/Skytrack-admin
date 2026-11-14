@@ -1,0 +1,72 @@
+{
+  "$comment": "Roles as they actually behave, verified Phase 0. The 'manager' role is DEFINED in the database and treated as an admin by the web frontend (AuthContext.tsx:116), but the backend grants it nothing (isAdminRole at index.ts:1746 accepts only admin and super_admin). A manager therefore sees the admin portal and receives 403 on every admin action. Academy content must not be written for the manager role until this is resolved.",
+  "generated": "2026-11-14",
+  "roles": {
+    "employee": {
+      "label": "Employee",
+      "portal": "employee",
+      "exists_in_db": true,
+      "functional": true,
+      "surfaces": ["android_app", "web_employee_portal"],
+      "can": [
+        "check in and out", "start and end breaks", "view own monthly attendance",
+        "download own timesheet", "apply for leave", "cancel own pending leave",
+        "view own leave balances", "view the holiday calendar", "view own profile",
+        "change own password", "view own salary card", "download own payslips",
+        "read own notification inbox"
+      ],
+      "cannot": [
+        "see any other employee's data", "approve leave", "edit attendance",
+        "open any admin screen", "call any admin action (403)"
+      ]
+    },
+    "manager": {
+      "label": "Manager",
+      "portal": "admin (frontend) / none (backend)",
+      "exists_in_db": true,
+      "functional": false,
+      "status": "BROKEN - do not document",
+      "detail": "Frontend lists 'manager' in adminRoles so the full admin portal renders; the backend never grants it, so every admin call returns 403. No account currently holds this role.",
+      "blocks": ["manager guide", "manager tutorials"],
+      "decision_required": "Either grant manager a real scoped permission set in the backend, or remove it from adminRoles so managers use the employee portal."
+    },
+    "admin": {
+      "label": "Administrator",
+      "portal": "admin",
+      "exists_in_db": true,
+      "functional": true,
+      "surfaces": ["web_admin_portal"],
+      "inherits": [],
+      "can": [
+        "view the live roster and dashboard", "view all attendance",
+        "enter and correct attendance manually", "undo a checkout",
+        "approve and reject leave", "adjust leave balances",
+        "declare, edit and delete holidays", "add and edit employees",
+        "manage departments, shifts and reporting managers",
+        "configure the office geofence", "configure payroll policy",
+        "set employee salaries", "review, lock and reopen a payroll month",
+        "export payroll CSV and download any payslip",
+        "change own profile and password"
+      ],
+      "cannot": [
+        "reset another employee's password", "edit a super admin's record",
+        "manage administrator accounts"
+      ]
+    },
+    "super_admin": {
+      "label": "Super administrator",
+      "portal": "admin",
+      "exists_in_db": true,
+      "functional": true,
+      "surfaces": ["web_admin_portal"],
+      "inherits": ["admin"],
+      "can_additionally": [
+        "open Admin Management (the only role-conditional UI in the app)",
+        "reset another employee's password",
+        "edit a super admin's record"
+      ],
+      "ui_gate": "Sidebar.tsx:26"
+    }
+  },
+  "audiences_for_content": ["employee", "admin", "super_admin"]
+}
