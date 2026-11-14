@@ -1,5 +1,5 @@
 import type { AcademyArticle } from '../../lib/academy'
-import { tutorialForArticle } from './simulator/scenarios'
+import { tutorialById } from './simulator/scenarios'
 
 interface TutorialLauncherProps {
   article: AcademyArticle
@@ -13,7 +13,7 @@ interface TutorialLauncherProps {
  */
 export function TutorialLauncher({ article, onLaunch }: TutorialLauncherProps) {
   if (!article.tutorialId) return null
-  const available = Boolean(onLaunch) && Boolean(tutorialForArticle(article.id))
+  const available = Boolean(onLaunch) && Boolean(tutorialById(article.tutorialId))
 
   return (
     <section className="mt-6 rounded-2xl border border-red-100 bg-red-50/60 p-4 flex items-start gap-3.5">

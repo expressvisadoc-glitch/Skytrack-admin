@@ -9,6 +9,7 @@ export const TUTORIALS: TutorialDefinition[] = [leaveApprovalTutorial]
 
 export const TUTORIALS_BY_ID = new Map(TUTORIALS.map((t) => [t.id, t]))
 
-export function tutorialForArticle(articleId: string): TutorialDefinition | null {
-  return TUTORIALS.find((t) => t.articleId === articleId) ?? null
+/** The walkthrough an article declares in its metadata (`tutorial.tutorial_id`), if it has been built. */
+export function tutorialById(tutorialId: string | null | undefined): TutorialDefinition | null {
+  return tutorialId ? (TUTORIALS_BY_ID.get(tutorialId) ?? null) : null
 }
