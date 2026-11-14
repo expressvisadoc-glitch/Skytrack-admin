@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
+import { locateTarget } from './locate'
 
 interface SpotlightProps {
   /** data-tutorial-target of the element to highlight; null dims everything */
@@ -18,41 +19,29 @@ export function Spotlight({ target, containerRef }: SpotlightProps) {
   const [rect, setRect] = useState<Rect | null>(null)
 
   useLayoutEffect(() => {
-    const measure = () => {
-      const container = containerRef.current
-      if (!container || !target) { setRect(null); return }
-      const el = container.querySelector<HTMLElement>(`[data-tutorial-target="${target}"]`)
-      if (!el) { setRect(null); return }
-      const c = container.getBoundingClientRect()
-      const r = el.getBoundingClientRect()
-      const pad = 6
-      setRect({
-        top: r.top - c.top - pad,
-        left: r.left - c.left - pad,
-        width: r.width + pad * 2,
-        height: r.height + pad * 2,
-      })
-    }
-    measure()
-    const id = window.setTimeout(measure, 60)   // after any layout settle
-    window.addEventListener('resize', measure)
-    return () => { window.clearTimeout(id); window.removeEventListener('resize', measure) }
-  }, [target, containerRef])
-
-  // Re-measure when the mock re-renders beneath us.
-  useEffect(() => {
     const container = containerRef.current
-    if (!container || !target) return
-    const observer = new MutationObserver(() => {
-      const el = container.querySelector<HTMLElement>(`[data-tutorial-target="${target}"]`)
-      if (!el) return
-      const c = container.getBoundingClientRect()
-      const r = el.getBoundingClientRect()
-      const pad = 6
-      setRect({ top: r.top - c.top - pad, left: r.left - c.left - pad, width: r.width + pad * 2, height: r.height + pad * 2 })
-    })
-    observer.observe(container, { childList: true, subtree: true, attributes: true })
-    return () => observer.disconnect()
+    if (!container || !target) { setRect(null); return }
+
+    const pad = 6
+    const measure = (reveal: boolean) => {
+      const r = locateTarget(container, target, reveal)
+      setRect(r && { top: r.top - pad, left: r.left - pad, width: r.width + pad * 2, height: r.height + pad * 2 })
+    }
+    // On a new step, bring the target into view inside the phone; afterwards only follow it, so a
+    // learner who scrolls the phone themselves is not dragged back.
+    measure(true)
+    const follow = () => measure(false)
+    const settle = window.setTimeout(follow, 60)
+    const observer = new MutationObserver(follow)
+    observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'disabled'] })
+    window.addEventListener('resize', follow)
+    container.addEventListener('scroll', follow, true)   // scroll does not bubble; capture sees the phone's
+    return () => {
+      window.clearTimeout(settle)
+      observer.disconnect()
+      window.removeEventListener('resize', follow)
+      container.removeEventListener('scroll', follow, true)
+    }
   }, [target, containerRef])
 
   const dim = 'absolute bg-slate-900/55 transition-all duration-200'

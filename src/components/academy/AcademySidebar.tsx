@@ -19,7 +19,8 @@ export function AcademySidebar({
     all.filter((a) => a.category === category)
 
   return (
-    <nav aria-label="Academy categories" className="flex flex-col gap-1">
+    <nav aria-label="All guides" className="flex flex-col gap-1">
+      <span className="px-3 pt-1 pb-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">All guides</span>
       {categories.map((category) => {
         const meta = CATEGORY_META[category]
         const isOpen = activeCategory === category

@@ -38,6 +38,8 @@ export interface TutorialStep {
   sampleInput?: string
   /** 'conditional' steps: which branch each choice leads to */
   branches?: Record<string, string>
+  /** 'select' steps: the option that satisfies the step. Any other choice is refused. */
+  expectedValue?: string
   /** Step id to continue from; defaults to the next step in order */
   next?: string
   /** Whether this step may be skipped */
@@ -61,7 +63,11 @@ export interface TutorialDefinition {
   role: 'employee' | 'admin' | 'super_admin'
   /** The article this tutorial belongs to */
   articleId: string
+  /** Which simulated SkyTrack to show: the admin portal or the employee phone app */
+  mock: 'admin' | 'employee'
   initialScreen: string
+  /** Effects applied to fresh demo data before the first step — e.g. "already checked in" */
+  setup?: TutorialEffect[]
   steps: TutorialStep[]
   completion: {
     message: string

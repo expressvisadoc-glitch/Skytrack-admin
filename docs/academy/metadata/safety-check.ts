@@ -52,8 +52,9 @@ check('payroll: a locked month', true, s.closedMonth.locked)
 check('payroll: a sample payslip', true, s.payslips.length > 0 && s.payslips[0].netPay > 0)
 
 console.log('\n--- isolation ---')
-const a = new TutorialEngine(TUTORIALS[0]); a.start()
-const b = new TutorialEngine(TUTORIALS[0]); b.start()
+const leaveTutorial = TUTORIALS.find((t) => t.id === 'tutorial.administrator.leave-approval')!
+const a = new TutorialEngine(leaveTutorial); a.start()
+const b = new TutorialEngine(leaveTutorial); b.start()
 a.next(); a.attempt('nav_leave_management', 'click'); a.attempt('leave_row_l1', 'click'); a.next()
 a.attempt('leave_decision', 'conditional', 'approve'); a.attempt('confirm_approve', 'confirm')
 check('one learner cannot affect another', 'pending', b.getState().leaves.find((l) => l.id === 'l1')!.status)

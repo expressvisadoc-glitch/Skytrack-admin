@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { TooltipPlacement, TutorialStep, TutorialProgress } from '../engine/types'
+import { locateTarget } from './locate'
 
 interface TooltipProps {
   step: TutorialStep
@@ -15,6 +16,12 @@ interface TooltipProps {
  * The instruction card. Positions itself against the current target and flips to the opposite side
  * when it would otherwise fall outside the mock, so it never covers the thing it is pointing at.
  */
+const HINTS: Partial<Record<TutorialStep['action'], string>> = {
+  input: 'Type in the highlighted box and select Continue — or Use the example',
+  select: 'Choose an option in the highlighted box',
+  conditional: 'Choose one of the highlighted options',
+}
+
 export function Tooltip({ step, progress, containerRef, onNext, onPrevious, onSkip, onExit }: TooltipProps) {
   const cardRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number; placement: TooltipPlacement }>({
@@ -26,54 +33,55 @@ export function Tooltip({ step, progress, containerRef, onNext, onPrevious, onSk
     const card = cardRef.current
     if (!container || !card) return
 
-    const wanted: TooltipPlacement = step.placement ?? 'bottom'
-    const c = container.getBoundingClientRect()
-    const cw = card.offsetWidth || 320
-    const ch = card.offsetHeight || 140
-    const gap = 14
+    const place = (reveal: boolean) => {
+      const wanted: TooltipPlacement = step.placement ?? 'bottom'
+      const c = container.getBoundingClientRect()
+      const cw = card.offsetWidth || 320
+      const ch = card.offsetHeight || 140
+      const gap = 14
+      const centred = { top: Math.max(16, c.height / 2 - ch / 2), left: Math.max(16, c.width / 2 - cw / 2), placement: 'center' as const }
 
-    if (!step.target || wanted === 'center') {
-      setPos({ top: Math.max(16, c.height / 2 - ch / 2), left: Math.max(16, c.width / 2 - cw / 2), placement: 'center' })
-      return
+      const r = step.target && wanted !== 'center' ? locateTarget(container, step.target, reveal) : null
+      if (!r) { setPos(centred); return }
+      const { top, left } = r
+
+      const candidates: Record<Exclude<TooltipPlacement, 'center'>, { top: number; left: number }> = {
+        bottom: { top: top + r.height + gap, left: left + r.width / 2 - cw / 2 },
+        top: { top: top - ch - gap, left: left + r.width / 2 - cw / 2 },
+        right: { top: top + r.height / 2 - ch / 2, left: left + r.width + gap },
+        left: { top: top + r.height / 2 - ch / 2, left: left - cw - gap },
+      }
+
+      // Above/below only have to fit vertically - their horizontal position is clamped afterwards.
+      // Requiring a horizontal fit too failed EVERY placement on a phone, where the card is nearly as
+      // wide as the stage, and the fallback then clamped the card straight on top of its target.
+      const fitsVertically = (p: { top: number }) => p.top >= 8 && p.top + ch <= c.height - 8
+      const fitsHorizontally = (p: { left: number }) => p.left >= 8 && p.left + cw <= c.width - 8
+      const fits = (side: Exclude<TooltipPlacement, 'center'>) => {
+        const p = candidates[side]
+        return side === 'top' || side === 'bottom' ? fitsVertically(p) : fitsVertically(p) && fitsHorizontally(p)
+      }
+
+      const order: Exclude<TooltipPlacement, 'center'>[] =
+        [wanted as Exclude<TooltipPlacement, 'center'>, 'bottom', 'top', 'right', 'left']
+
+      const chosen = order.find((side) => fits(side)) ?? 'bottom'
+      const p = candidates[chosen]
+      setPos({
+        top: Math.min(Math.max(8, p.top), Math.max(8, c.height - ch - 8)),
+        left: Math.min(Math.max(8, p.left), Math.max(8, c.width - cw - 8)),
+        placement: chosen,
+      })
     }
 
-    const el = container.querySelector<HTMLElement>(`[data-tutorial-target="${step.target}"]`)
-    if (!el) {
-      setPos({ top: Math.max(16, c.height / 2 - ch / 2), left: Math.max(16, c.width / 2 - cw / 2), placement: 'center' })
-      return
+    place(true)
+    const follow = () => place(false)
+    window.addEventListener('resize', follow)
+    container.addEventListener('scroll', follow, true)   // the phone mock scrolls inside the stage
+    return () => {
+      window.removeEventListener('resize', follow)
+      container.removeEventListener('scroll', follow, true)
     }
-
-    const r = el.getBoundingClientRect()
-    const top = r.top - c.top
-    const left = r.left - c.left
-
-    const candidates: Record<Exclude<TooltipPlacement, 'center'>, { top: number; left: number }> = {
-      bottom: { top: top + r.height + gap, left: left + r.width / 2 - cw / 2 },
-      top: { top: top - ch - gap, left: left + r.width / 2 - cw / 2 },
-      right: { top: top + r.height / 2 - ch / 2, left: left + r.width + gap },
-      left: { top: top + r.height / 2 - ch / 2, left: left - cw - gap },
-    }
-
-    // Above/below only have to fit vertically - their horizontal position is clamped afterwards.
-    // Requiring a horizontal fit too failed EVERY placement on a phone, where the card is nearly as
-    // wide as the stage, and the fallback then clamped the card straight on top of its target.
-    const fitsVertically = (p: { top: number }) => p.top >= 8 && p.top + ch <= c.height - 8
-    const fitsHorizontally = (p: { left: number }) => p.left >= 8 && p.left + cw <= c.width - 8
-    const fits = (side: Exclude<TooltipPlacement, 'center'>) => {
-      const p = candidates[side]
-      return side === 'top' || side === 'bottom' ? fitsVertically(p) : fitsVertically(p) && fitsHorizontally(p)
-    }
-
-    const order: Exclude<TooltipPlacement, 'center'>[] =
-      [wanted as Exclude<TooltipPlacement, 'center'>, 'bottom', 'top', 'right', 'left']
-
-    const chosen = order.find((side) => fits(side)) ?? 'bottom'
-    const p = candidates[chosen]
-    setPos({
-      top: Math.min(Math.max(8, p.top), Math.max(8, c.height - ch - 8)),
-      left: Math.min(Math.max(8, p.left), Math.max(8, c.width - cw - 8)),
-      placement: chosen,
-    })
   }, [step.id, step.target, step.placement, containerRef])
 
   // Once positioned, make sure the instruction is actually on screen. 'nearest' leaves a desktop
@@ -94,6 +102,13 @@ export function Tooltip({ step, progress, containerRef, onNext, onPrevious, onSk
       role="dialog"
       aria-live="polite"
       aria-label={step.instruction}
+      // Read by the automated walkthrough check (docs/academy/metadata), never by the app itself.
+      data-step-id={step.id}
+      data-step-action={step.action}
+      data-step-target={step.target}
+      data-step-sample={step.sampleInput}
+      data-step-expected={step.expectedValue}
+      data-step-branches={step.branches ? Object.keys(step.branches).join(',') : undefined}
       className="absolute z-40 scroll-mt-32 scroll-mb-6 w-[min(22rem,calc(100%-2rem))] rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 flex flex-col gap-2.5"
       style={{ top: pos.top, left: pos.left }}
     >
@@ -116,9 +131,7 @@ export function Tooltip({ step, progress, containerRef, onNext, onPrevious, onSk
       {needsAction && (
         <p className="text-[11.5px] text-red-600 font-semibold flex items-center gap-1.5">
           <span className="material-symbols-outlined text-[15px]">touch_app</span>
-          {step.action === 'input'
-            ? 'Type in the highlighted box, then select Add comment'
-            : 'Select the highlighted item to continue'}
+          {HINTS[step.action] ?? 'Select the highlighted item to continue'}
         </p>
       )}
 

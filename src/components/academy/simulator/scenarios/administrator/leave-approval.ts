@@ -18,6 +18,7 @@ export const leaveApprovalTutorial: TutorialDefinition = {
     'Decide a pending request and see how approval splits it into paid and unpaid days. Nothing you do here affects real records.',
   role: 'admin',
   articleId: 'administrator.leave.approve',
+  mock: 'admin',
   initialScreen: 'dashboard',
 
   steps: [

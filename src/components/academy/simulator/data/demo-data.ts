@@ -81,12 +81,68 @@ export interface DemoPayslip {
   netPay: number
 }
 
+/** Ananya's own day, as the employee app shows it */
+export interface DemoMyDay {
+  status: 'not_checked_in' | 'working' | 'on_break' | 'checked_out'
+  checkIn: string | null
+  checkOut: string | null
+  breakMinutes: number
+  breakStartedAt: string | null
+  totalHours: string | null
+  /** Distance from the office pin when the app last read the location */
+  distanceMeters: number
+}
+
+export interface DemoMonthDay {
+  date: string
+  day: number
+  weekday: string
+  kind: 'worked' | 'late' | 'week_off' | 'holiday' | 'future' | 'today'
+  checkIn?: string
+  checkOut?: string
+  breakMinutes?: number
+  lateMinutes?: number
+  total?: string
+}
+
+/** Ananya's provisional salary for the current month (per-minute late option) */
+export interface DemoMySalary {
+  month: string
+  monthlyGross: number
+  workingDays: number
+  perDayRate: number
+  perMinuteRate: number
+  absenceDays: number
+  lopLeaveDays: number
+  lateMinutes: number
+  lateAmount: number
+  netPay: number
+  days: { date: string; type: 'late' | 'absent' | 'lop_leave'; minutes?: number; amount: number }[]
+}
+
 export interface DemoState {
   employees: DemoEmployee[]
   leaves: DemoLeave[]
   attendance: DemoAttendance[]
   /** The month being worked on — still open, so figures can change */
-  payroll: { month: string; locked: boolean; version: number; rows: DemoPayrollRow[] }
+  payroll: { month: string; locked: boolean; version: number; rows: DemoPayrollRow[]; skipped?: string[] }
+  salaryHistory: { employeeId: string; amount: number; effectiveFrom: string; by: string; at: string }[]
+  geofence: {
+    officeName: string
+    latitude: number
+    longitude: number
+    radius: number
+    accuracy: number
+    maxAgeSeconds: number
+    active: boolean
+    history: { at: string; by: string; radius: number; accuracy: number }[]
+  }
+  /** The signed-in employee (Ananya) in the employee app */
+  me: DemoMyDay
+  myMonth: DemoMonthDay[]
+  mySalary: DemoMySalary
+  /** Open dialogs, tabs, revealed cards — whatever the mock needs to remember for one run */
+  ui: Record<string, unknown>
   /** A month already closed, with the payslip it issued */
   closedMonth: { month: string; locked: true; version: number; lockedBy: string; lockedAt: string }
   payslips: DemoPayslip[]
@@ -182,6 +238,65 @@ function initialState(): DemoState {
         totalDeductions: 0, netPay: 38000 },
     ],
 
+    salaryHistory: [
+      { employeeId: 'DEMO-001', amount: 20000, effectiveFrom: '2026-02-01', by: 'Priya Nair', at: '2026-01-28' },
+      { employeeId: 'DEMO-002', amount: 38000, effectiveFrom: '2025-06-15', by: 'Arjun Thomas', at: '2025-06-10' },
+    ],
+
+    geofence: {
+      officeName: 'SkyTrack Demo Office', latitude: 9.9312, longitude: 76.2673,
+      radius: 30, accuracy: 50, maxAgeSeconds: 120, active: true,
+      history: [{ at: '2 Nov 2026, 10:14', by: 'Priya Nair', radius: 30, accuracy: 50 }],
+    },
+
+    me: {
+      status: 'not_checked_in', checkIn: null, checkOut: null, breakMinutes: 0,
+      breakStartedAt: null, totalHours: null, distanceMeters: 12,
+    },
+
+    // November 2026: 30 days - 5 Sundays = 25 working days. Ananya was 27 minutes late on the 12th.
+    myMonth: [
+      { date: '2026-11-01', day: 1, weekday: 'Sun', kind: 'week_off' },
+      { date: '2026-11-02', day: 2, weekday: 'Mon', kind: 'worked', checkIn: '09:52', checkOut: '18:42', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-03', day: 3, weekday: 'Tue', kind: 'worked', checkIn: '09:53', checkOut: '18:43', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-04', day: 4, weekday: 'Wed', kind: 'worked', checkIn: '09:54', checkOut: '18:44', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-05', day: 5, weekday: 'Thu', kind: 'worked', checkIn: '09:55', checkOut: '18:45', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-06', day: 6, weekday: 'Fri', kind: 'worked', checkIn: '09:56', checkOut: '18:46', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-07', day: 7, weekday: 'Sat', kind: 'worked', checkIn: '09:57', checkOut: '18:47', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-08', day: 8, weekday: 'Sun', kind: 'week_off' },
+      { date: '2026-11-09', day: 9, weekday: 'Mon', kind: 'worked', checkIn: '09:59', checkOut: '18:49', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-10', day: 10, weekday: 'Tue', kind: 'worked', checkIn: '09:50', checkOut: '18:40', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-11', day: 11, weekday: 'Wed', kind: 'worked', checkIn: '09:51', checkOut: '18:41', breakMinutes: 45, total: '8h 05m' },
+      { date: '2026-11-12', day: 12, weekday: 'Thu', kind: 'late', checkIn: '10:27', checkOut: '19:10', breakMinutes: 30, lateMinutes: 27, total: '8h 13m' },
+      { date: '2026-11-13', day: 13, weekday: 'Fri', kind: 'today' },
+      { date: '2026-11-14', day: 14, weekday: 'Sat', kind: 'future' },
+      { date: '2026-11-15', day: 15, weekday: 'Sun', kind: 'week_off' },
+      { date: '2026-11-16', day: 16, weekday: 'Mon', kind: 'future' },
+      { date: '2026-11-17', day: 17, weekday: 'Tue', kind: 'future' },
+      { date: '2026-11-18', day: 18, weekday: 'Wed', kind: 'future' },
+      { date: '2026-11-19', day: 19, weekday: 'Thu', kind: 'future' },
+      { date: '2026-11-20', day: 20, weekday: 'Fri', kind: 'future' },
+      { date: '2026-11-21', day: 21, weekday: 'Sat', kind: 'future' },
+      { date: '2026-11-22', day: 22, weekday: 'Sun', kind: 'week_off' },
+      { date: '2026-11-23', day: 23, weekday: 'Mon', kind: 'future' },
+      { date: '2026-11-24', day: 24, weekday: 'Tue', kind: 'future' },
+      { date: '2026-11-25', day: 25, weekday: 'Wed', kind: 'future' },
+      { date: '2026-11-26', day: 26, weekday: 'Thu', kind: 'future' },
+      { date: '2026-11-27', day: 27, weekday: 'Fri', kind: 'future' },
+      { date: '2026-11-28', day: 28, weekday: 'Sat', kind: 'future' },
+      { date: '2026-11-29', day: 29, weekday: 'Sun', kind: 'week_off' },
+      { date: '2026-11-30', day: 30, weekday: 'Mon', kind: 'future' },
+    ],
+
+    // Per-minute late option, pro-rata: 20000 / 25 = 800 a day; 800 / 480 = 1.6667 a minute.
+    mySalary: {
+      month: 'November 2026', monthlyGross: 20000, workingDays: 25, perDayRate: 800, perMinuteRate: 1.67,
+      absenceDays: 0, lopLeaveDays: 0, lateMinutes: 27, lateAmount: 45, netPay: 19955,
+      days: [{ date: '2026-11-12', type: 'late', minutes: 27, amount: 45 }],
+    },
+
+    ui: {},
+
     payroll: {
       month: '2026-10', locked: false, version: 0,
       rows: [
@@ -193,7 +308,7 @@ function initialState(): DemoState {
           deductions: 19.79, netPay: 37980, flags: [] },
         { employeeId: 'DEMO-005', name: 'Imran Shaikh', monthlyGross: null, workingDays: 24,
           absenceDays: 2, lopLeaveDays: 0, lateDays: 0, lateMinutes: 0,
-          deductions: 0, netPay: null, flags: ['salary_not_set', 'joining_date_missing'] },
+          deductions: 0, netPay: null, flags: ['salary_not_set'] },
       ],
     },
   }

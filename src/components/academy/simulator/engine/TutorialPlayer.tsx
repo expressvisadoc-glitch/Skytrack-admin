@@ -72,7 +72,7 @@ export function TutorialPlayer({ definition, onExit }: TutorialPlayerProps) {
 
       {/* Stage */}
       <div ref={stageRef} className="relative rounded-xl overflow-hidden">
-        <MockApp engine={engine} tick={progress.done.length} />
+        <MockApp engine={engine} />
         {!finished && <Spotlight target={step?.target ?? null} containerRef={stageRef} />}
         {!finished && step && (
           <Tooltip

@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import {
-  ARTICLES_BY_ID, CATEGORY_META, countByCategory, categoriesForRole, visibleArticles,
+  ARTICLES_BY_ID, CATEGORY_META, visibleArticles,
   type AcademyArticle, type AcademyCategory, type AcademyRole,
 } from '../../lib/academy'
 import { AcademyLayout } from './AcademyLayout'
 import { AcademyHeader } from './AcademyHeader'
 import { AcademySearch } from './AcademySearch'
-import { CategoryCard } from './CategoryCard'
+import { TutorialCard } from './TutorialCard'
 import { ArticleRenderer } from './ArticleRenderer'
 import { RelatedArticles } from './RelatedArticles'
 import { TutorialLauncher } from './TutorialLauncher'
 import { FeedbackWidget } from './FeedbackWidget'
 import { AssistantLauncher } from './AssistantLauncher'
 import { TutorialPlayer } from './simulator/engine/TutorialPlayer'
-import { tutorialById } from './simulator/scenarios'
+import { TUTORIALS, tutorialById } from './simulator/scenarios'
+import type { TutorialDefinition } from './simulator/engine/types'
 
 interface AcademyProps {
   /** Opens a specific article on mount, e.g. from contextual help */
@@ -40,9 +41,13 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
   const [runningTutorialId, setRunningTutorialId] = useState<string | null>(null)
 
   const article: AcademyArticle | null = articleId ? (ARTICLES_BY_ID.get(articleId) ?? null) : null
-  const categories = useMemo(() => categoriesForRole(role), [role])
-  const counts = useMemo(() => countByCategory(role), [role])
   const articles = useMemo(() => visibleArticles(role), [role])
+  // The home grid offers only what can be practised now: tutorials whose guide this role can read.
+  // Every guide, with or without a tutorial, stays reachable from the sidebar and search.
+  const tutorials = useMemo(() => {
+    const readable = new Set(articles.map((a) => a.id))
+    return TUTORIALS.filter((t) => readable.has(t.articleId))
+  }, [articles])
 
   // Keep the sidebar in step with whatever is open.
   useEffect(() => {
@@ -60,6 +65,12 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
   }, [])
 
   const runningTutorial = tutorialById(runningTutorialId)
+
+  const startTutorial = useCallback((t: TutorialDefinition) => {
+    setArticleId(t.articleId)
+    setRunningTutorialId(t.id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
 
   const goHome = useCallback(() => { setArticleId(null); setCategory(null) }, [])
   const openCategory = useCallback((c: AcademyCategory) => { setCategory(c); setArticleId(null) }, [])
@@ -185,19 +196,27 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
                 <AcademySearch role={role} onOpenArticle={openArticle} variant="hero" />
               </section>
 
-              {categories.length === 0 ? (
+              {tutorials.length === 0 ? (
                 <ErrorPanel
                   icon="menu_book"
-                  title="No guides available yet"
-                  body="There is nothing published for your role at the moment."
+                  title="No tutorials for your role yet"
+                  body="Every guide is still available from the list of topics and from search."
                   onHome={goHome}
                 />
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {categories.map((c) => (
-                    <CategoryCard key={c} category={c} count={counts[c] ?? 0} onOpen={openCategory} />
-                  ))}
-                </div>
+                <section className="flex flex-col gap-3">
+                  <div>
+                    <h2 className="text-[15px] font-bold text-slate-900 tracking-tight">Interactive tutorials</h2>
+                    <p className="text-[12.5px] text-slate-500 mt-0.5">
+                      Practise in a simulated SkyTrack — nothing you do touches real records. Every written guide is listed under All guides.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {tutorials.map((t) => (
+                      <TutorialCard key={t.id} tutorial={t} onStart={startTutorial} onReadGuide={openArticle} />
+                    ))}
+                  </div>
+                </section>
               )}
             </div>
           )}
