@@ -17,13 +17,13 @@ export function TutorialLauncher({ article, onLaunch }: TutorialLauncherProps) {
   const available = Boolean(onLaunch)
 
   return (
-    <section className="mt-6 rounded-2xl border border-red-100 dark:border-red-900/60 bg-red-50/60 dark:bg-red-950/30 p-4 flex items-start gap-3.5">
-      <span className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-red-100 dark:border-red-900 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+    <section className="mt-6 rounded-2xl border border-red-100 bg-red-50/60 p-4 flex items-start gap-3.5">
+      <span className="w-10 h-10 rounded-xl bg-white border border-red-100 text-red-600 flex items-center justify-center shrink-0">
         <span className="material-symbols-outlined text-[21px]">play_circle</span>
       </span>
       <div className="flex-1 min-w-0">
-        <h3 className="text-[13.5px] font-bold text-slate-900 dark:text-slate-100">Interactive tutorial</h3>
-        <p className="text-[12.5px] text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
+        <h3 className="text-[13.5px] font-bold text-slate-900">Interactive tutorial</h3>
+        <p className="text-[12.5px] text-slate-600 mt-0.5 leading-relaxed">
           Practise this in a simulated SkyTrack. Nothing you do affects real records.
         </p>
         <button

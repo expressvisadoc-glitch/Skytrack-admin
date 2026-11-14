@@ -11,16 +11,16 @@ interface ArticleBreadcrumbProps {
 export function ArticleBreadcrumb({ category, title, onHome, onCategory }: ArticleBreadcrumbProps) {
   return (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[11.5px] font-semibold flex-wrap">
-      <button type="button" onClick={onHome} className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer">
+      <button type="button" onClick={onHome} className="text-slate-500 hover:text-red-600 cursor-pointer">
         Academy
       </button>
       {category && (
         <>
-          <span className="text-slate-300 dark:text-slate-600">/</span>
+          <span className="text-slate-300">/</span>
           <button
             type="button"
             onClick={() => onCategory(category)}
-            className="text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+            className="text-slate-500 hover:text-red-600 cursor-pointer"
           >
             {CATEGORY_META[category].label}
           </button>
@@ -28,8 +28,8 @@ export function ArticleBreadcrumb({ category, title, onHome, onCategory }: Artic
       )}
       {title && (
         <>
-          <span className="text-slate-300 dark:text-slate-600">/</span>
-          <span className="text-slate-700 dark:text-slate-200 truncate max-w-[22rem]">{title}</span>
+          <span className="text-slate-300">/</span>
+          <span className="text-slate-700 truncate max-w-[22rem]">{title}</span>
         </>
       )}
     </nav>

@@ -30,12 +30,12 @@ function renderInline(text: string, onOpenArticle: (id: string) => void): ReactN
 
     if (token.startsWith('`')) {
       nodes.push(
-        <code key={key++} className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[0.9em] font-mono text-slate-800 dark:text-slate-200">
+        <code key={key++} className="px-1.5 py-0.5 rounded bg-slate-100 text-[0.9em] font-mono text-slate-800">
           {token.slice(1, -1)}
         </code>,
       )
     } else if (token.startsWith('**')) {
-      nodes.push(<strong key={key++} className="font-bold text-slate-900 dark:text-slate-100">{token.slice(2, -2)}</strong>)
+      nodes.push(<strong key={key++} className="font-bold text-slate-900">{token.slice(2, -2)}</strong>)
     } else if (token.startsWith('[')) {
       const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token)
       if (linkMatch) {
@@ -46,14 +46,14 @@ function renderInline(text: string, onOpenArticle: (id: string) => void): ReactN
               key={key++}
               type="button"
               onClick={() => onOpenArticle(href)}
-              className="text-red-600 dark:text-red-400 hover:underline font-semibold cursor-pointer text-left"
+              className="text-red-600 hover:underline font-semibold cursor-pointer text-left"
             >
               {label}
             </button>,
           )
         } else if (/^https?:\/\//.test(href)) {
           nodes.push(
-            <a key={key++} href={href} target="_blank" rel="noreferrer" className="text-red-600 dark:text-red-400 hover:underline font-semibold">
+            <a key={key++} href={href} target="_blank" rel="noreferrer" className="text-red-600 hover:underline font-semibold">
               {label}
             </a>,
           )
@@ -95,7 +95,7 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
       while (i < lines.length && !lines[i].trim().startsWith('```')) { body.push(lines[i]); i++ }
       i++
       blocks.push(
-        <pre key={key++} className="my-4 p-4 rounded-xl bg-slate-900 dark:bg-slate-950 text-slate-100 text-[12.5px] leading-relaxed overflow-x-auto font-mono">
+        <pre key={key++} className="my-4 p-4 rounded-xl bg-slate-900 text-slate-100 text-[12.5px] leading-relaxed overflow-x-auto font-mono">
           <code>{body.join('\n')}</code>
         </pre>,
       )
@@ -104,7 +104,7 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
 
     // Horizontal rule
     if (/^---+$/.test(line.trim())) {
-      blocks.push(<hr key={key++} className="my-7 border-slate-200 dark:border-slate-700" />)
+      blocks.push(<hr key={key++} className="my-7 border-slate-200" />)
       i++
       continue
     }
@@ -115,11 +115,11 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
       const level = heading[1].length
       const text = heading[2]
       if (level === 1) {
-        blocks.push(<h1 key={key++} className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight mt-2 mb-4">{inline(text)}</h1>)
+        blocks.push(<h1 key={key++} className="text-2xl font-bold text-slate-900 tracking-tight mt-2 mb-4">{inline(text)}</h1>)
       } else if (level === 2) {
-        blocks.push(<h2 key={key++} className="text-[17px] font-bold text-slate-900 dark:text-slate-100 tracking-tight mt-7 mb-2.5">{inline(text)}</h2>)
+        blocks.push(<h2 key={key++} className="text-[17px] font-bold text-slate-900 tracking-tight mt-7 mb-2.5">{inline(text)}</h2>)
       } else {
-        blocks.push(<h3 key={key++} className="text-[14.5px] font-bold text-slate-800 dark:text-slate-200 mt-5 mb-2">{inline(text)}</h3>)
+        blocks.push(<h3 key={key++} className="text-[14.5px] font-bold text-slate-800 mt-5 mb-2">{inline(text)}</h3>)
       }
       i++
       continue
@@ -139,8 +139,8 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
           key={key++}
           className={`my-4 px-4 py-3 rounded-xl border text-[13px] leading-relaxed ${
             isNotice
-              ? 'bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/40 dark:border-amber-900 dark:text-amber-200'
-              : 'bg-slate-50 border-slate-200 text-slate-700 dark:bg-slate-800/60 dark:border-slate-700 dark:text-slate-300'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-slate-50 border-slate-200 text-slate-700'
           }`}
         >
           {isNotice && <span className="material-symbols-outlined text-[18px] align-middle mr-1.5">schedule</span>}
@@ -160,9 +160,9 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
         <div key={key++} className="my-4 overflow-x-auto">
           <table className="w-full text-[13px] border-collapse">
             <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-700">
+              <tr className="border-b border-slate-200">
                 {header.map((cell, n) => (
-                  <th key={n} className="text-left font-bold text-slate-500 dark:text-slate-400 uppercase text-[11px] tracking-wide py-2 pr-4 align-bottom">
+                  <th key={n} className="text-left font-bold text-slate-500 uppercase text-[11px] tracking-wide py-2 pr-4 align-bottom">
                     {inline(cell)}
                   </th>
                 ))}
@@ -170,9 +170,9 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
             </thead>
             <tbody>
               {rows.map((row, r) => (
-                <tr key={r} className="border-b border-slate-100 dark:border-slate-800 last:border-0 align-top">
+                <tr key={r} className="border-b border-slate-100 last:border-0 align-top">
                   {row.map((cell, c) => (
-                    <td key={c} className="py-2.5 pr-4 text-slate-700 dark:text-slate-300 leading-relaxed">{inline(cell)}</td>
+                    <td key={c} className="py-2.5 pr-4 text-slate-700 leading-relaxed">{inline(cell)}</td>
                   ))}
                 </tr>
               ))}
@@ -191,7 +191,7 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
         i++
       }
       blocks.push(
-        <ol key={key++} className="my-3 ml-5 list-decimal flex flex-col gap-1.5 text-[13.5px] text-slate-700 dark:text-slate-300 leading-relaxed marker:text-slate-400 marker:font-semibold">
+        <ol key={key++} className="my-3 ml-5 list-decimal flex flex-col gap-1.5 text-[13.5px] text-slate-700 leading-relaxed marker:text-slate-400 marker:font-semibold">
           {items.map((it, n) => <li key={n} className="pl-1">{inline(it)}</li>)}
         </ol>,
       )
@@ -206,7 +206,7 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
         i++
       }
       blocks.push(
-        <ul key={key++} className="my-3 ml-5 list-disc flex flex-col gap-1.5 text-[13.5px] text-slate-700 dark:text-slate-300 leading-relaxed marker:text-slate-300">
+        <ul key={key++} className="my-3 ml-5 list-disc flex flex-col gap-1.5 text-[13.5px] text-slate-700 leading-relaxed marker:text-slate-300">
           {items.map((it, n) => <li key={n} className="pl-1">{inline(it)}</li>)}
         </ul>,
       )
@@ -224,7 +224,7 @@ export function ArticleRenderer({ markdown, onOpenArticle }: ArticleRendererProp
     }
     if (para.length) {
       blocks.push(
-        <p key={key++} className="my-3 text-[13.5px] text-slate-700 dark:text-slate-300 leading-[1.75]">
+        <p key={key++} className="my-3 text-[13.5px] text-slate-700 leading-[1.75]">
           {inline(para.join(' '))}
         </p>,
       )

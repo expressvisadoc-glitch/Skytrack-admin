@@ -65,7 +65,7 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
           placeholder={isHero ? 'Search the guides — try "salary cut" or "cannot check in"' : 'Search guides…'}
-          className={`w-full rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 ${
+          className={`w-full rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 ${
             isHero ? 'h-13 pl-11 pr-4 py-3.5 text-[14px]' : 'h-10 pl-10 pr-3 text-[13px]'
           }`}
         />
@@ -73,11 +73,11 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
 
       {isHero && !showPanel && (
         <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="text-[11.5px] text-slate-400 dark:text-slate-500">Common questions:</span>
+          <span className="text-[11.5px] text-slate-400">Common questions:</span>
           {suggestions.map((s) => (
             <button
               key={s} type="button" onClick={() => { setQuery(s); setOpen(true) }}
-              className="px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 text-[11.5px] text-slate-600 dark:text-slate-300 hover:border-red-300 hover:text-red-600 transition-colors cursor-pointer"
+              className="px-2.5 py-1 rounded-full border border-slate-200 text-[11.5px] text-slate-600 hover:border-red-300 hover:text-red-600 transition-colors cursor-pointer"
             >
               {s}
             </button>
@@ -89,13 +89,13 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
         <div
           id="academy-search-results"
           role="listbox"
-          className="absolute z-30 mt-2 w-full max-h-[26rem] overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl"
+          className="absolute z-30 mt-2 w-full max-h-[26rem] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl"
         >
           {hits.length === 0 ? (
             <div className="p-5 text-center">
-              <span className="material-symbols-outlined text-[28px] text-slate-300 dark:text-slate-600">search_off</span>
-              <p className="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mt-1">No guides match “{query}”</p>
-              <p className="text-[11.5px] text-slate-400 dark:text-slate-500 mt-1">
+              <span className="material-symbols-outlined text-[28px] text-slate-300">search_off</span>
+              <p className="text-[13px] font-semibold text-slate-700 mt-1">No guides match “{query}”</p>
+              <p className="text-[11.5px] text-slate-400 mt-1">
                 Try a word you would use out loud, such as “late” or “payslip”.
               </p>
             </div>
@@ -110,21 +110,21 @@ export function AcademySearch({ role, onOpenArticle, variant = 'compact' }: Acad
                     onMouseEnter={() => setActive(n)}
                     onClick={() => choose(hit.article.id)}
                     className={`w-full text-left px-3.5 py-2.5 flex flex-col gap-0.5 cursor-pointer ${
-                      n === active ? 'bg-slate-50 dark:bg-slate-800' : ''
+                      n === active ? 'bg-slate-50' : ''
                     }`}
                   >
                     <span className="flex items-center gap-2 min-w-0">
                       <span className="material-symbols-outlined text-[16px] text-slate-400 shrink-0">
                         {CATEGORY_META[hit.article.category].icon}
                       </span>
-                      <span className="text-[13px] font-semibold text-slate-800 dark:text-slate-100 truncate">{hit.article.title}</span>
+                      <span className="text-[13px] font-semibold text-slate-800 truncate">{hit.article.title}</span>
                       {hit.article.featureStatus !== 'live' && (
-                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900">
+                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-200">
                           Soon
                         </span>
                       )}
                     </span>
-                    <span className="text-[11.5px] text-slate-500 dark:text-slate-400 line-clamp-2 pl-6">
+                    <span className="text-[11.5px] text-slate-500 line-clamp-2 pl-6">
                       {hit.excerpt ?? hit.article.description}
                     </span>
                   </button>

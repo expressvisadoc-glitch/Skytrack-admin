@@ -67,18 +67,18 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
       <div className="max-w-6xl mx-auto flex flex-col gap-6">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-md bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 text-[11px] font-bold tracking-wider uppercase border border-red-200/60 dark:border-red-900">
+            <span className="px-2.5 py-0.5 rounded-md bg-red-50 text-red-700 text-[11px] font-bold tracking-wider uppercase border border-red-200/60">
               Academy
             </span>
-            <span className="text-slate-300 dark:text-slate-600 text-xs font-semibold">•</span>
-            <span className="text-slate-500 dark:text-slate-400 text-[11px] font-semibold tracking-wider uppercase">
+            <span className="text-slate-300 text-xs font-semibold">•</span>
+            <span className="text-slate-500 text-[11px] font-semibold tracking-wider uppercase">
               Help &amp; Training
             </span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
             SkyTrack Academy
           </h1>
-          <p className="text-[13.5px] text-slate-500 dark:text-slate-400">
+          <p className="text-[13.5px] text-slate-500">
             Guides for everything you can do in SkyTrack, written for your role.
           </p>
         </div>
@@ -105,7 +105,7 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
               onHome={goHome}
             />
           ) : article ? (
-            <article className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-700/70 p-5 sm:p-7">
+            <article className="glass-panel rounded-2xl border border-slate-200/70 p-5 sm:p-7">
               <AcademyHeader
                 role={role}
                 category={article.category}
@@ -118,12 +118,12 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
               <TutorialLauncher article={article} />
               <RelatedArticles article={article} role={role} onOpenArticle={openArticle} />
               <FeedbackWidget articleId={article.id} />
-              <p className="mt-6 text-[11px] text-slate-400 dark:text-slate-500">
+              <p className="mt-6 text-[11px] text-slate-400">
                 Last updated {article.lastUpdated} · version {article.docVersion}
               </p>
             </article>
           ) : category ? (
-            <section className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-700/70 p-5 sm:p-7">
+            <section className="glass-panel rounded-2xl border border-slate-200/70 p-5 sm:p-7">
               <AcademyHeader
                 role={role}
                 category={category}
@@ -131,31 +131,31 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
                 onCategory={openCategory}
                 onOpenArticle={openArticle}
               />
-              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">
                 {CATEGORY_META[category].label}
               </h2>
-              <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-1">{CATEGORY_META[category].blurb}</p>
+              <p className="text-[13px] text-slate-500 mt-1">{CATEGORY_META[category].blurb}</p>
               <ul className="mt-5 flex flex-col gap-2">
                 {articles.filter((a) => a.category === category).map((a) => (
                   <li key={a.id}>
                     <button
                       type="button"
                       onClick={() => openArticle(a.id)}
-                      className="w-full text-left rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3 hover:border-red-300 dark:hover:border-red-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group"
+                      className="w-full text-left rounded-xl border border-slate-200 px-4 py-3 hover:border-red-300 hover:bg-slate-50 transition-colors cursor-pointer group"
                     >
                       <span className="flex items-center justify-between gap-3">
                         <span className="min-w-0">
                           <span className="flex items-center gap-2">
-                            <span className="text-[13.5px] font-semibold text-slate-800 dark:text-slate-100">{a.title}</span>
+                            <span className="text-[13.5px] font-semibold text-slate-800">{a.title}</span>
                             {a.featureStatus !== 'live' && (
-                              <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900">
+                              <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wide bg-amber-50 text-amber-700 border border-amber-200">
                                 Not released
                               </span>
                             )}
                           </span>
-                          <span className="block text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">{a.description}</span>
+                          <span className="block text-[12px] text-slate-500 mt-0.5">{a.description}</span>
                         </span>
-                        <span className="material-symbols-outlined text-[19px] text-slate-300 dark:text-slate-600 group-hover:text-red-500 shrink-0">
+                        <span className="material-symbols-outlined text-[19px] text-slate-300 group-hover:text-red-500 shrink-0">
                           chevron_right
                         </span>
                       </span>
@@ -166,8 +166,8 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
             </section>
           ) : (
             <div className="flex flex-col gap-6">
-              <section className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-700/70 p-6 sm:p-8 flex flex-col items-center text-center gap-3">
-                <h2 className="text-lg font-bold text-slate-900 dark:text-slate-50 tracking-tight">
+              <section className="glass-panel rounded-2xl border border-slate-200/70 p-6 sm:p-8 flex flex-col items-center text-center gap-3">
+                <h2 className="text-lg font-bold text-slate-900 tracking-tight">
                   What do you need help with?
                 </h2>
                 <AcademySearch role={role} onOpenArticle={openArticle} variant="hero" />
@@ -199,10 +199,10 @@ export function Academy({ initialArticleId = null }: AcademyProps) {
 
 function ErrorPanel({ icon, title, body, onHome }: { icon: string; title: string; body: string; onHome: () => void }) {
   return (
-    <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-700/70 p-10 flex flex-col items-center text-center gap-3">
-      <span className="material-symbols-outlined text-[34px] text-slate-300 dark:text-slate-600">{icon}</span>
-      <h2 className="text-[15px] font-bold text-slate-800 dark:text-slate-100">{title}</h2>
-      <p className="text-[13px] text-slate-500 dark:text-slate-400 max-w-sm leading-relaxed">{body}</p>
+    <div className="glass-panel rounded-2xl border border-slate-200/70 p-10 flex flex-col items-center text-center gap-3">
+      <span className="material-symbols-outlined text-[34px] text-slate-300">{icon}</span>
+      <h2 className="text-[15px] font-bold text-slate-800">{title}</h2>
+      <p className="text-[13px] text-slate-500 max-w-sm leading-relaxed">{body}</p>
       <button
         type="button" onClick={onHome}
         className="mt-1 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-[12px] font-bold transition-colors cursor-pointer"

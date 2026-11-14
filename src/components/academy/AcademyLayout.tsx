@@ -21,7 +21,7 @@ export function AcademyLayout({
   return (
     <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 items-start">
       <aside className="w-full lg:w-64 xl:w-72 shrink-0 lg:sticky lg:top-28">
-        <div className="glass-panel rounded-2xl border border-slate-200/70 dark:border-slate-700/70 p-3 max-h-[70vh] overflow-y-auto">
+        <div className="glass-panel rounded-2xl border border-slate-200/70 p-3 max-h-[70vh] overflow-y-auto">
           <AcademySidebar
             role={role}
             activeCategory={activeCategory}
