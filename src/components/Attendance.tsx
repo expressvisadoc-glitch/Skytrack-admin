@@ -1238,12 +1238,18 @@ export function Attendance() {
                 </div>
 
                 {/* Break Time Correction — for an employee who forgot to resume work */}
-                {selectedRecord.hasCheckedIn && (
+                {(
                   <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/80">
                     <div className="flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-[16px] text-red-600">free_breakfast</span>
                       <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">Break Time</span>
                     </div>
+
+                    {!selectedRecord.hasCheckedIn && (
+                      <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-500 leading-relaxed">
+                        No check-in on this date. Set the check-in time above first, then enter the break.
+                      </div>
+                    )}
 
                     {selectedRecord.isOnBreak && (
                       <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
@@ -1289,7 +1295,7 @@ export function Attendance() {
                         </div>
                         <button
                           type="button"
-                          disabled={isSavingBreak || !breakInputValid}
+                          disabled={isSavingBreak || !breakInputValid || !selectedRecord.hasCheckedIn}
                           onClick={handleSaveBreak}
                           className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 active:scale-95 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0 cursor-pointer"
                         >
