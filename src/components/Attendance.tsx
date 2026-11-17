@@ -4,6 +4,7 @@ import {
   getDailyAttendance,
   adminUndoCheckOut,
   adminSetAttendance,
+  adminSetBreak,
   timeToIso,
   isoToTimeInput,
   getCurrentTimeInput,
@@ -196,6 +197,9 @@ export function Attendance() {
   const [isSavingIn, setIsSavingIn] = useState<boolean>(false)
   const [isSavingOut, setIsSavingOut] = useState<boolean>(false)
   const [isUndoing, setIsUndoing] = useState<boolean>(false)
+  const [breakHours, setBreakHours] = useState<string>('0')
+  const [breakMins, setBreakMins] = useState<string>('0')
+  const [isSavingBreak, setIsSavingBreak] = useState<boolean>(false)
   const [confirmUndoRecord, setConfirmUndoRecord] = useState<FullAttendanceRecord | null>(null)
   const [toast, setToast] = useState<{
     type: 'success' | 'error' | 'info'
@@ -212,6 +216,13 @@ export function Attendance() {
       setManualCheckOutTime('')
     }
   }, [selectedRecord?.id, selectedRecord?.rawCheckIn, selectedRecord?.rawCheckOut])
+
+  // Keep the break inputs in sync with the selected employee's recorded break
+  useEffect(() => {
+    const total = Math.max(0, Math.round(selectedRecord?.breakMinutes ?? (selectedRecord?.totalBreakSeconds ? selectedRecord.totalBreakSeconds / 60 : 0)))
+    setBreakHours(String(Math.floor(total / 60)))
+    setBreakMins(String(total % 60))
+  }, [selectedRecord?.id, selectedRecord?.breakMinutes, selectedRecord?.totalBreakSeconds])
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -279,6 +290,42 @@ export function Attendance() {
       })
     } finally {
       setIsSavingOut(false)
+    }
+  }
+
+  const enteredBreakMinutes = (Number(breakHours) || 0) * 60 + (Number(breakMins) || 0)
+  const breakInputValid =
+    /^\d{1,2}$/.test(breakHours || '0') && /^\d{1,2}$/.test(breakMins || '0') &&
+    Number(breakMins || 0) < 60 && enteredBreakMinutes <= 720
+
+  const handleSaveBreak = async () => {
+    if (!token || !selectedRecord) return
+    if (!breakInputValid) {
+      setToast({ type: 'error', message: 'Enter hours (0–12) and minutes (0–59).' })
+      return
+    }
+    setIsSavingBreak(true)
+    try {
+      const res = await adminSetBreak(token, {
+        employeeDbId: selectedRecord.employeeDbId,
+        date: selectedDate,
+        breakMinutes: enteredBreakMinutes,
+      })
+      const h = Math.floor(enteredBreakMinutes / 60)
+      const m = enteredBreakMinutes % 60
+      const label = h ? `${h}h ${m}m` : `${m} min`
+      setToast({
+        type: 'success',
+        message: res.closedOpenBreak
+          ? `Break ended for ${selectedRecord.employeeName} and set to ${label}. They can now check out.`
+          : `Break set to ${label} for ${selectedRecord.employeeName}.`,
+      })
+      await loadAttendance()
+    } catch (err: any) {
+      console.error('Failed to set break:', err)
+      setToast({ type: 'error', message: err?.message || 'Failed to update break time.' })
+    } finally {
+      setIsSavingBreak(false)
     }
   }
 
@@ -1189,6 +1236,77 @@ export function Attendance() {
                     </div>
                   </div>
                 </div>
+
+                {/* Break Time Correction — for an employee who forgot to resume work */}
+                {selectedRecord.hasCheckedIn && (
+                  <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/80">
+                    <div className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px] text-red-600">free_breakfast</span>
+                      <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">Break Time</span>
+                    </div>
+
+                    {selectedRecord.isOnBreak && (
+                      <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                        <span className="font-bold">Still on break</span>
+                        {selectedRecord.breakStartedAt ? ` since ${formatTime(selectedRecord.breakStartedAt)}` : ''}. If they
+                        forgot to select Resume Work, enter their actual total break below. Saving ends the break so
+                        they can work and check out normally.
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/70 shadow-2xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-[11px] font-bold text-slate-700">Actual total break for the day</label>
+                        <div className="flex items-center gap-1">
+                          {[30, 45, 60].map((mins) => (
+                            <button
+                              key={mins}
+                              type="button"
+                              onClick={() => { setBreakHours(String(Math.floor(mins / 60))); setBreakMins(String(mins % 60)) }}
+                              className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+                            >
+                              {mins === 60 ? '1h' : `${mins}m`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 flex items-center gap-1.5">
+                          <input
+                            type="number" min={0} max={12} inputMode="numeric" aria-label="Break hours"
+                            value={breakHours}
+                            onChange={(e) => setBreakHours(e.target.value)}
+                            className="w-16 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-800"
+                          />
+                          <span className="text-[11px] font-semibold text-slate-500">h</span>
+                          <input
+                            type="number" min={0} max={59} inputMode="numeric" aria-label="Break minutes"
+                            value={breakMins}
+                            onChange={(e) => setBreakMins(e.target.value)}
+                            className="w-16 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-800"
+                          />
+                          <span className="text-[11px] font-semibold text-slate-500">min</span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isSavingBreak || !breakInputValid}
+                          onClick={handleSaveBreak}
+                          className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 active:scale-95 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          {isSavingBreak ? (
+                            <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                          ) : (
+                            <span className="material-symbols-outlined text-[15px]">save</span>
+                          )}
+                          <span>{selectedRecord.isOnBreak ? 'End Break & Save' : 'Set Break'}</span>
+                        </button>
+                      </div>
+                      <span className="text-[10px] text-slate-400">
+                        Replaces the day's total break. Worked hours are recalculated.
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Past Records Section Label */}
                 <div className="flex flex-col gap-2 pt-1">

@@ -2903,6 +2903,23 @@ export async function adminUndoCheckOut(
 }
 
 /**
+ * Sets the TOTAL break time for one employee on one day. Used when someone forgot to select
+ * "Resume work": any break still running is closed, so they are no longer stuck on break.
+ * Server-side only — break rows cannot be written from the browser.
+ */
+export async function adminSetBreak(
+  token: string,
+  params: { employeeDbId: string; date: string; breakMinutes: number }
+): Promise<{ success: boolean; message?: string; previousBreakMinutes?: number; breakMinutes?: number; closedOpenBreak?: boolean }> {
+  return fetchSkyTrackApi(token, {
+    action: 'admin_set_break',
+    employeeId: params.employeeDbId,
+    date: params.date,
+    breakMinutes: params.breakMinutes,
+  })
+}
+
+/**
  * Manually sets or updates an employee's Check In and/or Check Out time
  */
 export async function adminSetAttendance(
