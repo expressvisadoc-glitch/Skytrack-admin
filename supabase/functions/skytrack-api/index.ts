@@ -522,6 +522,10 @@ async function handleRequest(req: Request): Promise<Response> {
       return await handleAdminManualAttendance(employee, body);
     }
 
+    if (action === "admin_set_break") {
+      return await handleAdminSetBreak(employee, body);
+    }
+
     // =========================================================
     // LEAVE
     // =========================================================
@@ -3005,6 +3009,20 @@ async function handleAdminUpdateEmployeeDetails(employee: any, body: any): Promi
   text("department", 120);
   text("phone", 30);
   text("email", 254);
+  // "—" is the web app's empty placeholder; never store it in front of a number
+  if (typeof updates.phone === "string") {
+    updates.phone = updates.phone.replace(/^[\s\u2014\u2013-]+/, "").trim() || null;
+  }
+  if (input?.joining_date !== undefined) {
+    const raw = input.joining_date;
+    if (raw === null || raw === "") {
+      updates.joining_date = null;
+    } else if (typeof raw !== "string" || !isValidIsoDate(raw.trim()) || raw.trim() < "2000-01-01") {
+      errors.push("joining_date must be a valid date (YYYY-MM-DD) from 2000 onwards.");
+    } else {
+      updates.joining_date = raw.trim();
+    }
+  }
   if (typeof updates.email === "string" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updates.email)) {
     errors.push("email must be a valid email address.");
   }
@@ -5629,6 +5647,9 @@ async function handleAttendanceMonthly(
           logout: formatTime(effectiveCheckOut ?? null),
           check_in: att?.check_in ?? null,
           check_out: effectiveCheckOut ?? null,
+          // What is actually stored, for admin correction screens (check_out above may be an assumed end of shift)
+          recorded_check_out: att?.check_out ?? null,
+          break_started_at: att?.break_started_at ?? null,
           hours: formatDuration(activeMinutes),
           active_formatted: formatDuration(activeMinutes),
           breakFormatted: formatDuration(Math.round(rowBreakSec / 60)),
@@ -6977,6 +6998,141 @@ async function handleAdminUndoCheckout(employee: any, body: any): Promise<Respon
       error: "server_error",
       message: error instanceof Error ? error.message : "Failed to undo check-out."
     }, 500);
+  }
+}
+
+/**
+ * Admin correction of a day's break time.
+ *
+ * Used when an employee forgot to select "Resume work" (or End break) and reports their real break
+ * length. The admin enters the TOTAL break for that day. Any break still running is closed, so the
+ * employee is no longer stuck "On Break" and can check out. Worked minutes are recalculated when
+ * the day already has a check-out.
+ */
+async function handleAdminSetBreak(employee: any, body: any): Promise<Response> {
+  const role = String(employee?.role || "").toLowerCase();
+  if (role !== "admin" && role !== "super_admin") {
+    return json({ success: false, error: "forbidden", message: "Only administrators can change break time." }, 400);
+  }
+
+  try {
+    const targetEmployeeId = String(body.employeeId ?? body.employee_id ?? "").trim();
+    const date = String(body.date ?? body.attendance_date ?? "").trim();
+    // Either a new total ("breakMinutes") or a change to the current total ("adjustMinutes", + or -).
+    const hasAdjust = body.adjustMinutes !== undefined && body.adjustMinutes !== null;
+    const requestedTotal = Number(body.breakMinutes ?? body.break_minutes);
+    const adjustMinutes = Number(body.adjustMinutes);
+
+    if (!targetEmployeeId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return json({ success: false, error: "invalid_request", message: "Employee and date are required." }, 400);
+    }
+    if (hasAdjust) {
+      if (!Number.isInteger(adjustMinutes) || adjustMinutes === 0 || Math.abs(adjustMinutes) > 720) {
+        return json({ success: false, error: "invalid_adjust_minutes", message: "Enter a change between 1 and 720 minutes." }, 400);
+      }
+    } else if (!Number.isInteger(requestedTotal) || requestedTotal < 0 || requestedTotal > 720) {
+      return json({ success: false, error: "invalid_break_minutes", message: "Break must be a whole number of minutes between 0 and 720." }, 400);
+    }
+
+    let employeeDbId = targetEmployeeId;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetEmployeeId)) {
+      const { data: empRecord } = await adminClient
+        .from("employees").select("id").eq("employee_id", targetEmployeeId).maybeSingle();
+      if (empRecord?.id) employeeDbId = empRecord.id;
+    }
+
+    const { data: attendance, error: findError } = await adminClient
+      .from("attendance").select("*")
+      .eq("employee_id", employeeDbId).eq("attendance_date", date).maybeSingle();
+    if (findError) {
+      return json({ success: false, error: "database_error", message: findError.message }, 500);
+    }
+    if (!attendance || !attendance.check_in) {
+      return json({ success: false, error: "attendance_not_found", message: "There is no check-in for this employee on that date. Set the check-in first." }, 404);
+    }
+
+    const currentBreakMinutes = attendance.break_minutes ??
+      (attendance.total_break_seconds ? Math.round(attendance.total_break_seconds / 60) : 0);
+    const breakMinutes = hasAdjust ? currentBreakMinutes + adjustMinutes : requestedTotal;
+    if (breakMinutes < 0) {
+      return json({
+        success: false,
+        error: "break_below_zero",
+        message: `Can't remove ${Math.abs(adjustMinutes)} minutes: only ${currentBreakMinutes} minutes of break are recorded.`,
+      }, 400);
+    }
+
+    // A break cannot be longer than the time the person was checked in.
+    const nowIso = new Date().toISOString();
+    const endIso = attendance.check_out ?? nowIso;
+    const spanMinutes = Math.floor((new Date(endIso).getTime() - new Date(attendance.check_in).getTime()) / 60000);
+    if (breakMinutes > Math.max(0, spanMinutes)) {
+      return json({
+        success: false,
+        error: "break_exceeds_shift",
+        message: `Break can't be longer than the time checked in (${Math.max(0, spanMinutes)} minutes).`,
+      }, 400);
+    }
+
+    // Close any break left running, so the employee is no longer stuck on break.
+    const { data: breakRows } = await adminClient
+      .from("attendance_breaks").select("id, break_end, break_minutes")
+      .eq("attendance_id", attendance.id).order("break_start", { ascending: true });
+    const rows = breakRows ?? [];
+    const closedTotal = rows.filter((r: any) => r.break_end).reduce((sum: number, r: any) => sum + Number(r.break_minutes ?? 0), 0);
+    // Decided before anything is written, so later updates cannot change the answer.
+    const openRows = rows.filter((r: any) => !r.break_end);
+    const wasOnBreak = openRows.length > 0 || Boolean(attendance.break_started_at);
+    let remaining = Math.max(0, breakMinutes - closedTotal);
+    for (const row of openRows) {
+      const { error: closeError } = await adminClient
+        .from("attendance_breaks")
+        .update({ break_end: endIso, break_minutes: remaining, updated_at: nowIso })
+        .eq("id", row.id);
+      if (closeError) {
+        return json({ success: false, error: "update_failed", message: closeError.message }, 500);
+      }
+      remaining = 0;
+    }
+
+    let workedMinutes: number | null = attendance.worked_minutes ?? null;
+    if (attendance.check_out) {
+      workedMinutes = Math.max(0, spanMinutes - breakMinutes);
+    }
+
+    const previousBreakMinutes = currentBreakMinutes;
+
+    const { data: updated, error: updateError } = await adminClient
+      .from("attendance")
+      .update({
+        break_minutes: breakMinutes,
+        total_break_seconds: breakMinutes * 60,
+        break_started_at: null,
+        worked_minutes: workedMinutes,
+        updated_at: nowIso,
+      })
+      .eq("id", attendance.id)
+      .select()
+      .single();
+    if (updateError) {
+      return json({ success: false, error: "update_failed", message: updateError.message }, 500);
+    }
+
+    console.log(`admin_set_break: ${employee?.employee_id ?? employee?.id} set break for attendance ${attendance.id} ` +
+      `(${date}) from ${previousBreakMinutes} to ${breakMinutes} min; open breaks closed: ${openRows.length}`);
+    await notifyAttendanceEditedByAdmin(employee, updated?.employee_id ?? attendance.employee_id, date);
+
+    return json({
+      success: true,
+      message: "Break time updated.",
+      previousBreakMinutes,
+      breakMinutes,
+      closedOpenBreak: wasOnBreak,
+      attendance: updated,
+    });
+  } catch (error) {
+    console.error("handleAdminSetBreak error:", error);
+    return json({ success: false, error: "server_error", message: error instanceof Error ? error.message : "Failed to update break time." }, 500);
   }
 }
 

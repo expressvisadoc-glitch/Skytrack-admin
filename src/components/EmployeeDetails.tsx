@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import {
+  cleanContactValue,
   getEmployeeHistory,
   updateEmployeeDetails,
   deleteEmployee,
@@ -14,6 +15,7 @@ import {
   getOrganizationData,
   updateEmployeeOrganization,
   updateEmployeeId,
+  formatDate,
   isUuid,
   type OrganizationData,
 } from '../lib/api'
@@ -90,13 +92,14 @@ export function EmployeeDetails({
     employeeId: initialEmployee?.employee_id || initialEmployee?.code || '',
     role: initialEmployee?.designation || initialEmployee?.role || '',
     department: initialEmployee?.department || '',
-    email: initialEmployee?.email || '',
-    phone: initialEmployee?.phone || '',
+    email: cleanContactValue(initialEmployee?.email),
+    phone: cleanContactValue(initialEmployee?.phone),
     accountStatus: initialEmployee?.accountStatus || 'Active',
     avatar: initialEmployee?.avatar || '',
     reportingManagerId: initialEmployee?.reportingManagerId || '',
     departmentId: initialEmployee?.departmentId || '',
     workShiftId: initialEmployee?.workShiftId || '',
+    joiningDate: initialEmployee?.joiningDateIso || '',
   })
   const [isSaving, setIsSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
@@ -175,13 +178,14 @@ export function EmployeeDetails({
         employeeId: initialEmployee.employee_id || initialEmployee.code || '',
         role: initialEmployee.designation || initialEmployee.role || '',
         department: initialEmployee.department || '',
-        email: initialEmployee.email || '',
-        phone: initialEmployee.phone || '',
+        email: cleanContactValue(initialEmployee.email),
+        phone: cleanContactValue(initialEmployee.phone),
         accountStatus: initialEmployee.accountStatus || 'Active',
         avatar: initialEmployee.avatar || '',
         reportingManagerId: initialEmployee.reportingManagerId || '',
         departmentId: matchedDeptId,
         workShiftId: initialEmployee.workShiftId || '',
+        joiningDate: initialEmployee.joiningDateIso || '',
       })
     }
   }, [initialEmployee, departmentsList])
@@ -234,6 +238,11 @@ export function EmployeeDetails({
     setEditError(null)
 
     try {
+      const joiningDateChanged = editFormData.joiningDate !== (currentEmp.joiningDateIso || '')
+      if (joiningDateChanged && editFormData.joiningDate && !/^\d{4}-\d{2}-\d{2}$/.test(editFormData.joiningDate)) {
+        throw new Error('Enter a valid joining date.')
+      }
+
       let finalDeptId = editFormData.departmentId || null
       let finalDeptName = editFormData.department.trim()
 
@@ -255,10 +264,12 @@ export function EmployeeDetails({
         designation: editFormData.role.trim(),
         department: finalDeptName,
         department_id: finalDeptId,
-        email: editFormData.email.trim(),
-        phone: editFormData.phone.trim(),
+        email: cleanContactValue(editFormData.email),
+        phone: cleanContactValue(editFormData.phone),
         status: editFormData.accountStatus.toLowerCase(),
         profile_photo_url: editFormData.avatar.trim() || undefined,
+        // Only sent when changed, so a date that was never loaded can't be wiped by accident.
+        ...(joiningDateChanged ? { joining_date: editFormData.joiningDate || null } : {}),
       })
 
       await updateEmployeeOrganization(
@@ -282,13 +293,15 @@ export function EmployeeDetails({
         role: currentEmp.role || 'employee',
         designation: editFormData.role.trim(),
         department: finalDeptName,
-        email: editFormData.email.trim(),
-        phone: editFormData.phone.trim(),
+        email: cleanContactValue(editFormData.email),
+        phone: cleanContactValue(editFormData.phone),
         accountStatus: editFormData.accountStatus as 'Active' | 'Suspended' | 'Pending',
         avatar: editFormData.avatar.trim(),
         reportingManagerId: editFormData.reportingManagerId || null,
         departmentId: finalDeptId,
         workShiftId: editFormData.workShiftId || null,
+        joiningDateIso: editFormData.joiningDate || null,
+        joiningDate: editFormData.joiningDate ? formatDate(editFormData.joiningDate) : '—',
       }
 
       setCurrentEmp(updatedEmp)
@@ -921,6 +934,24 @@ export function EmployeeDetails({
                             )
                           })}
                         </select>
+                      </div>
+
+                      {/* Joining Date */}
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="edit-joining-date" className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          Joining Date
+                        </label>
+                        <input
+                          id="edit-joining-date"
+                          type="date"
+                          min="2000-01-01"
+                          value={editFormData.joiningDate}
+                          onChange={(e) => setEditFormData({ ...editFormData, joiningDate: e.target.value })}
+                          className="w-full h-11 px-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10 transition-all font-medium"
+                        />
+                        <span className="text-[11px] text-slate-400">
+                          Attendance history starts from this date.
+                        </span>
                       </div>
                     </div>
                   )}

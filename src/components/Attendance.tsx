@@ -3,10 +3,6 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   getDailyAttendance,
   adminUndoCheckOut,
-  adminSetAttendance,
-  timeToIso,
-  isoToTimeInput,
-  getCurrentTimeInput,
   formatTime,
   type FullAttendanceRecord,
 } from '../lib/api'
@@ -14,6 +10,7 @@ import { generateAttendancePdf } from '../lib/attendancePdf'
 import { EmployeeAttendanceHistory } from './EmployeeAttendanceHistory'
 import { EmptyState } from './EmptyState'
 import { SkeletonTableRows } from './Skeleton'
+import { AttendanceDayEditor } from './AttendanceDayEditor'
 
 export function Attendance() {
   const { token, logout } = useAuth()
@@ -193,10 +190,6 @@ export function Attendance() {
   }
 
   // Manual Attendance & Undo Check-Out State
-  const [manualCheckInTime, setManualCheckInTime] = useState<string>('')
-  const [manualCheckOutTime, setManualCheckOutTime] = useState<string>('')
-  const [isSavingIn, setIsSavingIn] = useState<boolean>(false)
-  const [isSavingOut, setIsSavingOut] = useState<boolean>(false)
   const [isUndoing, setIsUndoing] = useState<boolean>(false)
   const [confirmUndoRecord, setConfirmUndoRecord] = useState<FullAttendanceRecord | null>(null)
   const [toast, setToast] = useState<{
@@ -204,85 +197,12 @@ export function Attendance() {
     message: string
   } | null>(null)
 
-  // Keep manual time inputs in sync with the selected employee
-  useEffect(() => {
-    if (selectedRecord) {
-      setManualCheckInTime(isoToTimeInput(selectedRecord.rawCheckIn))
-      setManualCheckOutTime(isoToTimeInput(selectedRecord.rawCheckOut))
-    } else {
-      setManualCheckInTime('')
-      setManualCheckOutTime('')
-    }
-  }, [selectedRecord?.id, selectedRecord?.rawCheckIn, selectedRecord?.rawCheckOut])
-
   // Auto-dismiss toast
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(timer)
   }, [toast])
-
-  const handleSaveCheckIn = async () => {
-    if (!token || !selectedRecord) return
-    if (!manualCheckInTime) {
-      setToast({ type: 'error', message: 'Please select a valid Check In time.' })
-      return
-    }
-    setIsSavingIn(true)
-    try {
-      const isoCheckIn = timeToIso(selectedDate, manualCheckInTime)
-      await adminSetAttendance(token, {
-        employeeDbId: selectedRecord.employeeDbId,
-        date: selectedDate,
-        checkIn: isoCheckIn,
-        attendanceDbId: selectedRecord.attendanceDbId,
-      })
-      setToast({
-        type: 'success',
-        message: `Check In set to ${formatTime(isoCheckIn)} for ${selectedRecord.employeeName}.`,
-      })
-      await loadAttendance()
-    } catch (err: any) {
-      console.error('Failed to set check in:', err)
-      setToast({
-        type: 'error',
-        message: err?.message || 'Failed to update check in time.',
-      })
-    } finally {
-      setIsSavingIn(false)
-    }
-  }
-
-  const handleSaveCheckOut = async () => {
-    if (!token || !selectedRecord) return
-    if (!manualCheckOutTime) {
-      setToast({ type: 'error', message: 'Please select a valid Check Out time.' })
-      return
-    }
-    setIsSavingOut(true)
-    try {
-      const isoCheckOut = timeToIso(selectedDate, manualCheckOutTime)
-      await adminSetAttendance(token, {
-        employeeDbId: selectedRecord.employeeDbId,
-        date: selectedDate,
-        checkOut: isoCheckOut,
-        attendanceDbId: selectedRecord.attendanceDbId,
-      })
-      setToast({
-        type: 'success',
-        message: `Check Out set to ${formatTime(isoCheckOut)} for ${selectedRecord.employeeName}.`,
-      })
-      await loadAttendance()
-    } catch (err: any) {
-      console.error('Failed to set check out:', err)
-      setToast({
-        type: 'error',
-        message: err?.message || 'Failed to update check out time.',
-      })
-    } finally {
-      setIsSavingOut(false)
-    }
-  }
 
   const handleConfirmUndoCheckOut = async (record: FullAttendanceRecord) => {
     if (!token) return
@@ -1070,120 +990,22 @@ export function Attendance() {
                   </div>
                 )}
 
-                {/* Manual Check In & Check Out Controls */}
-                <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/80">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[16px] text-red-600">
-                        schedule
-                      </span>
-                      <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">
-                        Manual Check In & Check Out
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-500">
-                      {formattedSelectedDate}
-                    </span>
-                  </div>
-
-                  {/* Check In Manual Row */}
-                  <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/70 shadow-2xs">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                        <span>Check In Time</span>
-                      </label>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setManualCheckInTime(getCurrentTimeInput())}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                          title="Set to current time"
-                        >
-                          Now
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setManualCheckInTime('09:00')}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                          title="Set to standard shift start"
-                        >
-                          09:00 AM
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="time"
-                        value={manualCheckInTime}
-                        onChange={(e) => setManualCheckInTime(e.target.value)}
-                        className="flex-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-800"
-                      />
-                      <button
-                        type="button"
-                        disabled={isSavingIn || !manualCheckInTime}
-                        onClick={handleSaveCheckIn}
-                        className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        {isSavingIn ? (
-                          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                        ) : (
-                          <span className="material-symbols-outlined text-[15px]">login</span>
-                        )}
-                        <span>Set Check In</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Check Out Manual Row */}
-                  <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/70 shadow-2xs">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                        <span>Check Out Time</span>
-                      </label>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setManualCheckOutTime(getCurrentTimeInput())}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                          title="Set to current time"
-                        >
-                          Now
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setManualCheckOutTime('18:00')}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                          title="Set to standard shift end"
-                        >
-                          06:00 PM
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="time"
-                        value={manualCheckOutTime}
-                        onChange={(e) => setManualCheckOutTime(e.target.value)}
-                        className="flex-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-800"
-                      />
-                      <button
-                        type="button"
-                        disabled={isSavingOut || !manualCheckOutTime}
-                        onClick={handleSaveCheckOut}
-                        className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 active:scale-95 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        {isSavingOut ? (
-                          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                        ) : (
-                          <span className="material-symbols-outlined text-[15px]">logout</span>
-                        )}
-                        <span>Set Check Out</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                {/* Check in / check out / break correction for the selected date */}
+                {token && (
+                  <AttendanceDayEditor
+                    token={token}
+                    employeeDbId={selectedRecord.employeeDbId}
+                    employeeName={selectedRecord.employeeName}
+                    date={selectedDate}
+                    rawCheckIn={selectedRecord.rawCheckIn}
+                    rawCheckOut={selectedRecord.rawCheckOut}
+                    breakMinutes={selectedRecord.breakMinutes ?? (selectedRecord.totalBreakSeconds ? selectedRecord.totalBreakSeconds / 60 : 0)}
+                    isOnBreak={selectedRecord.isOnBreak}
+                    breakStartedAt={selectedRecord.breakStartedAt}
+                    onSaved={loadAttendance}
+                    onMessage={(type, message) => setToast({ type, message })}
+                  />
+                )}
 
                 {/* Past Records Section Label */}
                 <div className="flex flex-col gap-2 pt-1">

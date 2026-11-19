@@ -434,6 +434,17 @@ export function formatMinutesShort(total?: number | null): string {
 }
 
 /**
+ * Cleans a contact value (phone or email) for display and editing.
+ * The directory uses "—" as an empty placeholder; if that placeholder leaked into an
+ * edit form it got saved in front of the real value (e.g. "—9876543210").
+ * Strips leading dashes/whitespace and returns '' when nothing is left.
+ */
+export function cleanContactValue(value?: string | null): string {
+  if (!value) return ''
+  return String(value).replace(/^[\s\u2014\u2013-]+/, '').trim()
+}
+
+/**
  * Formats a Date object or date string (e.g. "2026-09-21") into "21 Sep 2026"
  */
 export function formatDate(dateStr?: string | null): string {
@@ -901,6 +912,8 @@ export interface EmployeeDirectoryItem {
   email: string
   phone?: string
   joiningDate?: string
+  /** Joining date as stored ('YYYY-MM-DD'), for editing; joiningDate above is formatted for display */
+  joiningDateIso?: string | null
   avatar: string
   initials?: string
   initialsBg?: string
@@ -1071,9 +1084,10 @@ export async function getEmployeesDirectory(
       role: emp.role || 'employee',
       designation: emp.designation || 'Field Personnel',
       department: emp.department_id ? (deptsData?.find(d => d.id === emp.department_id)?.department_name || emp.department) : (emp.department || 'Department Not Set'),
-      email: emp.email || '—',
-      phone: emp.phone || '—',
+      email: cleanContactValue(emp.email) || '—',
+      phone: cleanContactValue(emp.phone) || '—',
       joiningDate: emp.joining_date ? formatDate(emp.joining_date) : '—',
+      joiningDateIso: emp.joining_date ? String(emp.joining_date).slice(0, 10) : null,
       avatar: emp.profile_photo_url || emp.avatar_url || '',
       initials,
       attendanceToday: {
@@ -1432,7 +1446,7 @@ export async function getDailyAttendance(
       joiningDate: emp.joining_date || emp.created_at,
       created_at: emp.created_at,
       email: emp.email,
-      phone: emp.phone,
+      phone: cleanContactValue(emp.phone) || undefined,
       rawDate: targetDate,
       rawCheckIn: attRecord?.check_in ?? null,
       rawCheckOut: attRecord?.check_out ?? null,
@@ -1469,6 +1483,10 @@ export interface MonthlyAttendanceDay {
   checkOut: string
   rawCheckIn?: string | null
   rawCheckOut?: string | null
+  /** The check-out actually recorded, never an assumed end of shift */
+  recordedCheckOut?: string | null
+  /** A break was started and never ended */
+  isOnBreak?: boolean
   breakMinutes: number
   breakFormatted: string
   workedMinutes: number
@@ -1676,6 +1694,9 @@ export async function getEmployeeMonthlyAttendance(
           checkOut: formattedCheckOut,
           rawCheckIn: att.check_in,
           rawCheckOut: effectiveCheckOutIso,
+          // Older servers only send the effective check-out, which may be an assumed end of shift
+          recordedCheckOut: 'recorded_check_out' in att ? (att.recorded_check_out ?? null) : (att.check_out ?? null),
+          isOnBreak: Boolean(att.break_started_at && !att.check_out),
           breakMinutes: breakMins,
           breakFormatted,
           workedMinutes,
@@ -1707,7 +1728,7 @@ export async function getEmployeeMonthlyAttendance(
           created_at: emp.created_at,
           avatar: emp.profile_photo_url || emp.avatar_url,
           email: emp.email,
-          phone: emp.phone,
+          phone: cleanContactValue(emp.phone) || undefined,
         },
         month: selectedMonth,
         monthName: selectedMonthLabel,
@@ -1921,7 +1942,7 @@ export async function getEmployeeMonthlyAttendance(
       created_at: emp.created_at,
       avatar: emp.profile_photo_url || emp.avatar_url,
       email: emp.email,
-      phone: emp.phone,
+      phone: cleanContactValue(emp.phone) || undefined,
     },
     month: selectedMonth,
     monthName: selectedMonthLabel,
@@ -2241,6 +2262,8 @@ export interface UpdateEmployeePayload {
   department_id?: string | null
   status?: string
   profile_photo_url?: string
+  /** 'YYYY-MM-DD'; null clears it */
+  joining_date?: string | null
 }
 
 /**
@@ -2775,6 +2798,49 @@ export async function adminUndoCheckOut(
     employeeId: params.employeeDbId,
     date: params.date,
   })
+}
+
+/**
+ * Corrects one employee's break time for one day: either sets a new total (breakMinutes) or adds/
+ * removes minutes (adjustMinutes, + or -). Any break still running is closed, so someone who forgot
+ * to select "Resume work" is no longer stuck on break. Break rows can only be written server-side.
+ *
+ * Deliberately NOT sent through fetchSkyTrackApi: that helper signs the admin out on some error
+ * replies, and a server without this action must produce an error message, not a logout.
+ */
+export async function adminSetBreak(
+  token: string,
+  params: { employeeDbId: string; date: string; breakMinutes?: number; adjustMinutes?: number }
+): Promise<{ success: boolean; message?: string; previousBreakMinutes?: number; breakMinutes?: number; closedOpenBreak?: boolean }> {
+  const payload = {
+    action: 'admin_set_break',
+    employeeId: params.employeeDbId,
+    date: params.date,
+    ...(params.adjustMinutes !== undefined ? { adjustMinutes: params.adjustMinutes } : { breakMinutes: params.breakMinutes }),
+  }
+  const directEdgeUrl = `${SUPABASE_BASE_URL}/functions/v1/skytrack-api`
+  const urls = [...new Set([SKYTRACK_API_URL, directEdgeUrl].filter(Boolean))]
+  let lastError = 'Could not reach the SkyTrack server.'
+  for (const url of urls) {
+    let data: any
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      })
+      data = await res.json()
+    } catch {
+      continue
+    }
+    if (data?.success) return data
+    if (data?.error === 'unsupported_action' || /unsupported action|unknown action/i.test(String(data?.message ?? ''))) {
+      throw new Error('Break correction is not available on the server yet. Ask your developer to deploy the latest SkyTrack server update.')
+    }
+    lastError = data?.message || data?.error || lastError
+    break
+  }
+  throw new Error(lastError)
 }
 
 /**
