@@ -473,6 +473,17 @@ export function formatTime(isoStr?: string | null): string {
 }
 
 /**
+ * Cleans a contact value (phone or email) for display and editing.
+ * The directory uses "—" as an empty placeholder; if that placeholder leaked into an
+ * edit form it got saved in front of the real value (e.g. "—9876543210").
+ * Strips leading dashes/whitespace and returns '' when nothing is left.
+ */
+export function cleanContactValue(value?: string | null): string {
+  if (!value) return ''
+  return String(value).replace(/^[\s\u2014\u2013-]+/, '').trim()
+}
+
+/**
  * Formats a Date object or date string (e.g. "2026-09-21") into "21 Sep 2026"
  */
 export function formatDate(dateStr?: string | null): string {
@@ -1083,8 +1094,8 @@ export async function getEmployeesDirectory(
       role: emp.role || 'employee',
       designation: emp.designation || 'Field Personnel',
       department: emp.department_id ? (deptsData?.find(d => d.id === emp.department_id)?.department_name || emp.department) : (emp.department || 'Department Not Set'),
-      email: emp.email || '—',
-      phone: emp.phone || '—',
+      email: cleanContactValue(emp.email) || '—',
+      phone: cleanContactValue(emp.phone) || '—',
       joiningDate: emp.joining_date ? formatDate(emp.joining_date) : '—',
       joiningDateIso: emp.joining_date ? String(emp.joining_date).slice(0, 10) : null,
       avatar: emp.profile_photo_url || emp.avatar_url || '',
@@ -1445,7 +1456,7 @@ export async function getDailyAttendance(
       joiningDate: emp.joining_date || emp.created_at,
       created_at: emp.created_at,
       email: emp.email,
-      phone: emp.phone,
+      phone: cleanContactValue(emp.phone) || undefined,
       rawDate: targetDate,
       rawCheckIn: attRecord?.check_in ?? null,
       rawCheckOut: attRecord?.check_out ?? null,
@@ -1727,7 +1738,7 @@ export async function getEmployeeMonthlyAttendance(
           created_at: emp.created_at,
           avatar: emp.profile_photo_url || emp.avatar_url,
           email: emp.email,
-          phone: emp.phone,
+          phone: cleanContactValue(emp.phone) || undefined,
         },
         month: selectedMonth,
         monthName: selectedMonthLabel,
@@ -1941,7 +1952,7 @@ export async function getEmployeeMonthlyAttendance(
       created_at: emp.created_at,
       avatar: emp.profile_photo_url || emp.avatar_url,
       email: emp.email,
-      phone: emp.phone,
+      phone: cleanContactValue(emp.phone) || undefined,
     },
     month: selectedMonth,
     monthName: selectedMonthLabel,
