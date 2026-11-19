@@ -911,6 +911,8 @@ export interface EmployeeDirectoryItem {
   email: string
   phone?: string
   joiningDate?: string
+  /** Joining date as stored ('YYYY-MM-DD'), for editing; joiningDate above is formatted for display */
+  joiningDateIso?: string | null
   avatar: string
   initials?: string
   initialsBg?: string
@@ -1084,6 +1086,7 @@ export async function getEmployeesDirectory(
       email: emp.email || '—',
       phone: emp.phone || '—',
       joiningDate: emp.joining_date ? formatDate(emp.joining_date) : '—',
+      joiningDateIso: emp.joining_date ? String(emp.joining_date).slice(0, 10) : null,
       avatar: emp.profile_photo_url || emp.avatar_url || '',
       initials,
       attendanceToday: {
@@ -2297,6 +2300,8 @@ export interface UpdateEmployeePayload {
   department_id?: string | null
   status?: string
   profile_photo_url?: string
+  /** 'YYYY-MM-DD'; null clears it */
+  joining_date?: string | null
 }
 
 /**
