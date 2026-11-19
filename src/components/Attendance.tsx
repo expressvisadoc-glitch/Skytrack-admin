@@ -200,6 +200,7 @@ export function Attendance() {
   const [breakHours, setBreakHours] = useState<string>('0')
   const [breakMins, setBreakMins] = useState<string>('0')
   const [isSavingBreak, setIsSavingBreak] = useState<boolean>(false)
+  const [breakMode, setBreakMode] = useState<'set' | 'add' | 'subtract'>('set')
   const [confirmUndoRecord, setConfirmUndoRecord] = useState<FullAttendanceRecord | null>(null)
   const [toast, setToast] = useState<{
     type: 'success' | 'error' | 'info'
@@ -217,12 +218,17 @@ export function Attendance() {
     }
   }, [selectedRecord?.id, selectedRecord?.rawCheckIn, selectedRecord?.rawCheckOut])
 
-  // Keep the break inputs in sync with the selected employee's recorded break
+  const currentBreakMinutes = Math.max(0, Math.round(
+    selectedRecord?.breakMinutes ?? (selectedRecord?.totalBreakSeconds ? selectedRecord.totalBreakSeconds / 60 : 0)
+  ))
+
+  // Keep the break inputs in sync with the selected employee: "Set total" starts from the recorded
+  // break, "Add" and "Subtract" start from zero.
   useEffect(() => {
-    const total = Math.max(0, Math.round(selectedRecord?.breakMinutes ?? (selectedRecord?.totalBreakSeconds ? selectedRecord.totalBreakSeconds / 60 : 0)))
-    setBreakHours(String(Math.floor(total / 60)))
-    setBreakMins(String(total % 60))
-  }, [selectedRecord?.id, selectedRecord?.breakMinutes, selectedRecord?.totalBreakSeconds])
+    const start = breakMode === 'set' ? currentBreakMinutes : 0
+    setBreakHours(String(Math.floor(start / 60)))
+    setBreakMins(String(start % 60))
+  }, [selectedRecord?.id, currentBreakMinutes, breakMode])
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -294,14 +300,30 @@ export function Attendance() {
   }
 
   const enteredBreakMinutes = (Number(breakHours) || 0) * 60 + (Number(breakMins) || 0)
+  const newBreakTotal =
+    breakMode === 'set' ? enteredBreakMinutes
+      : breakMode === 'add' ? currentBreakMinutes + enteredBreakMinutes
+      : currentBreakMinutes - enteredBreakMinutes
+  const fmtBreak = (mins: number) => {
+    const h = Math.floor(Math.abs(mins) / 60)
+    const m = Math.abs(mins) % 60
+    return h ? `${h}h ${m}m` : `${m} min`
+  }
   const breakInputValid =
     /^\d{1,2}$/.test(breakHours || '0') && /^\d{1,2}$/.test(breakMins || '0') &&
-    Number(breakMins || 0) < 60 && enteredBreakMinutes <= 720
+    Number(breakMins || 0) < 60 && enteredBreakMinutes <= 720 &&
+    (breakMode === 'set' || enteredBreakMinutes > 0) &&
+    newBreakTotal >= 0 && newBreakTotal <= 720
 
   const handleSaveBreak = async () => {
     if (!token || !selectedRecord) return
     if (!breakInputValid) {
-      setToast({ type: 'error', message: 'Enter hours (0–12) and minutes (0–59).' })
+      setToast({
+        type: 'error',
+        message: newBreakTotal < 0
+          ? `Only ${fmtBreak(currentBreakMinutes)} of break is recorded, so that much can't be removed.`
+          : 'Enter hours (0–12) and minutes (0–59).',
+      })
       return
     }
     setIsSavingBreak(true)
@@ -309,17 +331,18 @@ export function Attendance() {
       const res = await adminSetBreak(token, {
         employeeDbId: selectedRecord.employeeDbId,
         date: selectedDate,
-        breakMinutes: enteredBreakMinutes,
+        ...(breakMode === 'set'
+          ? { breakMinutes: enteredBreakMinutes }
+          : { adjustMinutes: breakMode === 'add' ? enteredBreakMinutes : -enteredBreakMinutes }),
       })
-      const h = Math.floor(enteredBreakMinutes / 60)
-      const m = enteredBreakMinutes % 60
-      const label = h ? `${h}h ${m}m` : `${m} min`
+      const label = fmtBreak(res.breakMinutes ?? newBreakTotal)
       setToast({
         type: 'success',
         message: res.closedOpenBreak
           ? `Break ended for ${selectedRecord.employeeName} and set to ${label}. They can now check out.`
-          : `Break set to ${label} for ${selectedRecord.employeeName}.`,
+          : `Break is now ${label} for ${selectedRecord.employeeName}.`,
       })
+      setBreakMode('set')
       await loadAttendance()
     } catch (err: any) {
       console.error('Failed to set break:', err)
@@ -1255,16 +1278,39 @@ export function Attendance() {
                       <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
                         <span className="font-bold">Still on break</span>
                         {selectedRecord.breakStartedAt ? ` since ${formatTime(selectedRecord.breakStartedAt)}` : ''}. If they
-                        forgot to select Resume Work, enter their actual total break below. Saving ends the break so
+                        forgot to select Resume Work, enter their actual break below. Saving ends the break so
                         they can work and check out normally.
                       </div>
                     )}
 
                     <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/70 shadow-2xs">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[11px] font-bold text-slate-700">
+                          Recorded break: <span className="text-slate-900">{fmtBreak(currentBreakMinutes)}</span>
+                        </span>
+                      </div>
+                      <div role="radiogroup" aria-label="Break correction" className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-slate-100">
+                        {([['set', 'Set total'], ['add', 'Add'], ['subtract', 'Subtract']] as const).map(([mode, label]) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            role="radio"
+                            aria-checked={breakMode === mode}
+                            onClick={() => setBreakMode(mode)}
+                            className={`py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                              breakMode === mode ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                       <div className="flex items-center justify-between gap-2">
-                        <label className="text-[11px] font-bold text-slate-700">Actual total break for the day</label>
+                        <label className="text-[11px] font-bold text-slate-700">
+                          {breakMode === 'set' ? 'Actual total break for the day' : breakMode === 'add' ? 'Minutes to add' : 'Minutes to remove'}
+                        </label>
                         <div className="flex items-center gap-1">
-                          {[30, 45, 60].map((mins) => (
+                          {(breakMode === 'set' ? [30, 45, 60] : [15, 30, 60]).map((mins) => (
                             <button
                               key={mins}
                               type="button"
@@ -1304,11 +1350,13 @@ export function Attendance() {
                           ) : (
                             <span className="material-symbols-outlined text-[15px]">save</span>
                           )}
-                          <span>{selectedRecord.isOnBreak ? 'End Break & Save' : 'Set Break'}</span>
+                          <span>{selectedRecord.isOnBreak ? 'End Break & Save' : breakMode === 'set' ? 'Set Break' : breakMode === 'add' ? 'Add' : 'Subtract'}</span>
                         </button>
                       </div>
-                      <span className="text-[10px] text-slate-400">
-                        Replaces the day's total break. Worked hours are recalculated.
+                      <span className={`text-[10px] ${newBreakTotal < 0 ? 'text-red-600 font-semibold' : 'text-slate-400'}`}>
+                        {newBreakTotal < 0
+                          ? `Only ${fmtBreak(currentBreakMinutes)} is recorded — that much can't be removed.`
+                          : `${fmtBreak(currentBreakMinutes)} → ${fmtBreak(newBreakTotal)} for the day. Worked hours are recalculated.`}
                       </span>
                     </div>
                   </div>

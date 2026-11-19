@@ -5035,12 +5035,19 @@ async function handleAdminSetBreak(employee: any, body: any): Promise<Response> 
   try {
     const targetEmployeeId = String(body.employeeId ?? body.employee_id ?? "").trim();
     const date = String(body.date ?? body.attendance_date ?? "").trim();
-    const breakMinutes = Number(body.breakMinutes ?? body.break_minutes);
+    // Either a new total ("breakMinutes") or a change to the current total ("adjustMinutes", + or -).
+    const hasAdjust = body.adjustMinutes !== undefined && body.adjustMinutes !== null;
+    const requestedTotal = Number(body.breakMinutes ?? body.break_minutes);
+    const adjustMinutes = Number(body.adjustMinutes);
 
     if (!targetEmployeeId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return json({ success: false, error: "invalid_request", message: "Employee and date are required." }, 400);
     }
-    if (!Number.isInteger(breakMinutes) || breakMinutes < 0 || breakMinutes > 720) {
+    if (hasAdjust) {
+      if (!Number.isInteger(adjustMinutes) || adjustMinutes === 0 || Math.abs(adjustMinutes) > 720) {
+        return json({ success: false, error: "invalid_adjust_minutes", message: "Enter a change between 1 and 720 minutes." }, 400);
+      }
+    } else if (!Number.isInteger(requestedTotal) || requestedTotal < 0 || requestedTotal > 720) {
       return json({ success: false, error: "invalid_break_minutes", message: "Break must be a whole number of minutes between 0 and 720." }, 400);
     }
 
@@ -5061,6 +5068,17 @@ async function handleAdminSetBreak(employee: any, body: any): Promise<Response> 
       return json({ success: false, error: "attendance_not_found", message: "There is no check-in for this employee on that date. Set the check-in first." }, 404);
     }
 
+    const currentBreakMinutes = attendance.break_minutes ??
+      (attendance.total_break_seconds ? Math.round(attendance.total_break_seconds / 60) : 0);
+    const breakMinutes = hasAdjust ? currentBreakMinutes + adjustMinutes : requestedTotal;
+    if (breakMinutes < 0) {
+      return json({
+        success: false,
+        error: "break_below_zero",
+        message: `Can't remove ${Math.abs(adjustMinutes)} minutes: only ${currentBreakMinutes} minutes of break are recorded.`,
+      }, 400);
+    }
+
     // A break cannot be longer than the time the person was checked in.
     const nowIso = new Date().toISOString();
     const endIso = attendance.check_out ?? nowIso;
@@ -5079,8 +5097,11 @@ async function handleAdminSetBreak(employee: any, body: any): Promise<Response> 
       .eq("attendance_id", attendance.id).order("break_start", { ascending: true });
     const rows = breakRows ?? [];
     const closedTotal = rows.filter((r: any) => r.break_end).reduce((sum: number, r: any) => sum + Number(r.break_minutes ?? 0), 0);
+    // Decided before anything is written, so later updates cannot change the answer.
+    const openRows = rows.filter((r: any) => !r.break_end);
+    const wasOnBreak = openRows.length > 0 || Boolean(attendance.break_started_at);
     let remaining = Math.max(0, breakMinutes - closedTotal);
-    for (const row of rows.filter((r: any) => !r.break_end)) {
+    for (const row of openRows) {
       const { error: closeError } = await adminClient
         .from("attendance_breaks")
         .update({ break_end: endIso, break_minutes: remaining, updated_at: nowIso })
@@ -5096,8 +5117,7 @@ async function handleAdminSetBreak(employee: any, body: any): Promise<Response> 
       workedMinutes = Math.max(0, spanMinutes - breakMinutes);
     }
 
-    const previousBreakMinutes = attendance.break_minutes ??
-      (attendance.total_break_seconds ? Math.round(attendance.total_break_seconds / 60) : 0);
+    const previousBreakMinutes = currentBreakMinutes;
 
     const { data: updated, error: updateError } = await adminClient
       .from("attendance")
@@ -5116,14 +5136,14 @@ async function handleAdminSetBreak(employee: any, body: any): Promise<Response> 
     }
 
     console.log(`admin_set_break: ${employee?.employee_id ?? employee?.id} set break for attendance ${attendance.id} ` +
-      `(${date}) from ${previousBreakMinutes} to ${breakMinutes} min; open breaks closed: ${rows.filter((r: any) => !r.break_end).length}`);
+      `(${date}) from ${previousBreakMinutes} to ${breakMinutes} min; open breaks closed: ${openRows.length}`);
 
     return json({
       success: true,
       message: "Break time updated.",
       previousBreakMinutes,
       breakMinutes,
-      closedOpenBreak: rows.some((r: any) => !r.break_end) || Boolean(attendance.break_started_at),
+      closedOpenBreak: wasOnBreak,
       attendance: updated,
     });
   } catch (error) {

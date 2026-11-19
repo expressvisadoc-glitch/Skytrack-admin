@@ -2903,20 +2903,46 @@ export async function adminUndoCheckOut(
 }
 
 /**
- * Sets the TOTAL break time for one employee on one day. Used when someone forgot to select
- * "Resume work": any break still running is closed, so they are no longer stuck on break.
- * Server-side only — break rows cannot be written from the browser.
+ * Corrects one employee's break time for one day: either sets a new total (breakMinutes) or adds/
+ * removes minutes (adjustMinutes, + or -). Any break still running is closed, so someone who forgot
+ * to select "Resume work" is no longer stuck on break. Break rows can only be written server-side.
+ *
+ * Deliberately NOT sent through fetchSkyTrackApi: that helper signs the admin out on some error
+ * replies, and a server without this action must produce an error message, not a logout.
  */
 export async function adminSetBreak(
   token: string,
-  params: { employeeDbId: string; date: string; breakMinutes: number }
+  params: { employeeDbId: string; date: string; breakMinutes?: number; adjustMinutes?: number }
 ): Promise<{ success: boolean; message?: string; previousBreakMinutes?: number; breakMinutes?: number; closedOpenBreak?: boolean }> {
-  return fetchSkyTrackApi(token, {
+  const payload = {
     action: 'admin_set_break',
     employeeId: params.employeeDbId,
     date: params.date,
-    breakMinutes: params.breakMinutes,
-  })
+    ...(params.adjustMinutes !== undefined ? { adjustMinutes: params.adjustMinutes } : { breakMinutes: params.breakMinutes }),
+  }
+  const directEdgeUrl = `${SUPABASE_BASE_URL}/functions/v1/skytrack-api`
+  const urls = [...new Set([SKYTRACK_API_URL, directEdgeUrl].filter(Boolean))]
+  let lastError = 'Could not reach the SkyTrack server.'
+  for (const url of urls) {
+    let data: any
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      })
+      data = await res.json()
+    } catch {
+      continue
+    }
+    if (data?.success) return data
+    if (data?.error === 'unsupported_action' || /unsupported action|unknown action/i.test(String(data?.message ?? ''))) {
+      throw new Error('Break correction is not available on the server yet. Ask your developer to deploy the latest SkyTrack server update.')
+    }
+    lastError = data?.message || data?.error || lastError
+    break
+  }
+  throw new Error(lastError)
 }
 
 /**
