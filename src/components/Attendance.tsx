@@ -3,16 +3,12 @@ import { useAuth } from '../contexts/AuthContext'
 import {
   getDailyAttendance,
   adminUndoCheckOut,
-  adminSetAttendance,
-  adminSetBreak,
-  timeToIso,
-  isoToTimeInput,
-  getCurrentTimeInput,
   formatTime,
   type FullAttendanceRecord,
 } from '../lib/api'
 import { generateAttendancePdf } from '../lib/attendancePdf'
 import { EmployeeAttendanceHistory } from './EmployeeAttendanceHistory'
+import { AttendanceDayEditor } from './AttendanceDayEditor'
 
 export function Attendance() {
   const { token, logout } = useAuth()
@@ -192,43 +188,12 @@ export function Attendance() {
   }
 
   // Manual Attendance & Undo Check-Out State
-  const [manualCheckInTime, setManualCheckInTime] = useState<string>('')
-  const [manualCheckOutTime, setManualCheckOutTime] = useState<string>('')
-  const [isSavingIn, setIsSavingIn] = useState<boolean>(false)
-  const [isSavingOut, setIsSavingOut] = useState<boolean>(false)
   const [isUndoing, setIsUndoing] = useState<boolean>(false)
-  const [breakHours, setBreakHours] = useState<string>('0')
-  const [breakMins, setBreakMins] = useState<string>('0')
-  const [isSavingBreak, setIsSavingBreak] = useState<boolean>(false)
-  const [breakMode, setBreakMode] = useState<'set' | 'add' | 'subtract'>('set')
   const [confirmUndoRecord, setConfirmUndoRecord] = useState<FullAttendanceRecord | null>(null)
   const [toast, setToast] = useState<{
     type: 'success' | 'error' | 'info'
     message: string
   } | null>(null)
-
-  // Keep manual time inputs in sync with the selected employee
-  useEffect(() => {
-    if (selectedRecord) {
-      setManualCheckInTime(isoToTimeInput(selectedRecord.rawCheckIn))
-      setManualCheckOutTime(isoToTimeInput(selectedRecord.rawCheckOut))
-    } else {
-      setManualCheckInTime('')
-      setManualCheckOutTime('')
-    }
-  }, [selectedRecord?.id, selectedRecord?.rawCheckIn, selectedRecord?.rawCheckOut])
-
-  const currentBreakMinutes = Math.max(0, Math.round(
-    selectedRecord?.breakMinutes ?? (selectedRecord?.totalBreakSeconds ? selectedRecord.totalBreakSeconds / 60 : 0)
-  ))
-
-  // Keep the break inputs in sync with the selected employee: "Set total" starts from the recorded
-  // break, "Add" and "Subtract" start from zero.
-  useEffect(() => {
-    const start = breakMode === 'set' ? currentBreakMinutes : 0
-    setBreakHours(String(Math.floor(start / 60)))
-    setBreakMins(String(start % 60))
-  }, [selectedRecord?.id, currentBreakMinutes, breakMode])
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -236,121 +201,6 @@ export function Attendance() {
     const timer = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(timer)
   }, [toast])
-
-  const handleSaveCheckIn = async () => {
-    if (!token || !selectedRecord) return
-    if (!manualCheckInTime) {
-      setToast({ type: 'error', message: 'Please select a valid Check In time.' })
-      return
-    }
-    setIsSavingIn(true)
-    try {
-      const isoCheckIn = timeToIso(selectedDate, manualCheckInTime)
-      await adminSetAttendance(token, {
-        employeeDbId: selectedRecord.employeeDbId,
-        date: selectedDate,
-        checkIn: isoCheckIn,
-        attendanceDbId: selectedRecord.attendanceDbId,
-      })
-      setToast({
-        type: 'success',
-        message: `Check In set to ${formatTime(isoCheckIn)} for ${selectedRecord.employeeName}.`,
-      })
-      await loadAttendance()
-    } catch (err: any) {
-      console.error('Failed to set check in:', err)
-      setToast({
-        type: 'error',
-        message: err?.message || 'Failed to update check in time.',
-      })
-    } finally {
-      setIsSavingIn(false)
-    }
-  }
-
-  const handleSaveCheckOut = async () => {
-    if (!token || !selectedRecord) return
-    if (!manualCheckOutTime) {
-      setToast({ type: 'error', message: 'Please select a valid Check Out time.' })
-      return
-    }
-    setIsSavingOut(true)
-    try {
-      const isoCheckOut = timeToIso(selectedDate, manualCheckOutTime)
-      await adminSetAttendance(token, {
-        employeeDbId: selectedRecord.employeeDbId,
-        date: selectedDate,
-        checkOut: isoCheckOut,
-        attendanceDbId: selectedRecord.attendanceDbId,
-      })
-      setToast({
-        type: 'success',
-        message: `Check Out set to ${formatTime(isoCheckOut)} for ${selectedRecord.employeeName}.`,
-      })
-      await loadAttendance()
-    } catch (err: any) {
-      console.error('Failed to set check out:', err)
-      setToast({
-        type: 'error',
-        message: err?.message || 'Failed to update check out time.',
-      })
-    } finally {
-      setIsSavingOut(false)
-    }
-  }
-
-  const enteredBreakMinutes = (Number(breakHours) || 0) * 60 + (Number(breakMins) || 0)
-  const newBreakTotal =
-    breakMode === 'set' ? enteredBreakMinutes
-      : breakMode === 'add' ? currentBreakMinutes + enteredBreakMinutes
-      : currentBreakMinutes - enteredBreakMinutes
-  const fmtBreak = (mins: number) => {
-    const h = Math.floor(Math.abs(mins) / 60)
-    const m = Math.abs(mins) % 60
-    return h ? `${h}h ${m}m` : `${m} min`
-  }
-  const breakInputValid =
-    /^\d{1,2}$/.test(breakHours || '0') && /^\d{1,2}$/.test(breakMins || '0') &&
-    Number(breakMins || 0) < 60 && enteredBreakMinutes <= 720 &&
-    (breakMode === 'set' || enteredBreakMinutes > 0) &&
-    newBreakTotal >= 0 && newBreakTotal <= 720
-
-  const handleSaveBreak = async () => {
-    if (!token || !selectedRecord) return
-    if (!breakInputValid) {
-      setToast({
-        type: 'error',
-        message: newBreakTotal < 0
-          ? `Only ${fmtBreak(currentBreakMinutes)} of break is recorded, so that much can't be removed.`
-          : 'Enter hours (0–12) and minutes (0–59).',
-      })
-      return
-    }
-    setIsSavingBreak(true)
-    try {
-      const res = await adminSetBreak(token, {
-        employeeDbId: selectedRecord.employeeDbId,
-        date: selectedDate,
-        ...(breakMode === 'set'
-          ? { breakMinutes: enteredBreakMinutes }
-          : { adjustMinutes: breakMode === 'add' ? enteredBreakMinutes : -enteredBreakMinutes }),
-      })
-      const label = fmtBreak(res.breakMinutes ?? newBreakTotal)
-      setToast({
-        type: 'success',
-        message: res.closedOpenBreak
-          ? `Break ended for ${selectedRecord.employeeName} and set to ${label}. They can now check out.`
-          : `Break is now ${label} for ${selectedRecord.employeeName}.`,
-      })
-      setBreakMode('set')
-      await loadAttendance()
-    } catch (err: any) {
-      console.error('Failed to set break:', err)
-      setToast({ type: 'error', message: err?.message || 'Failed to update break time.' })
-    } finally {
-      setIsSavingBreak(false)
-    }
-  }
 
   const handleConfirmUndoCheckOut = async (record: FullAttendanceRecord) => {
     if (!token) return
@@ -1145,221 +995,21 @@ export function Attendance() {
                   </div>
                 )}
 
-                {/* Manual Check In & Check Out Controls */}
-                <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/80">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[16px] text-red-600">
-                        schedule
-                      </span>
-                      <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">
-                        Manual Check In & Check Out
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-500">
-                      {formattedSelectedDate}
-                    </span>
-                  </div>
-
-                  {/* Check In Manual Row */}
-                  <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/70 shadow-2xs">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                        <span>Check In Time</span>
-                      </label>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setManualCheckInTime(getCurrentTimeInput())}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                          title="Set to current time"
-                        >
-                          Now
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setManualCheckInTime('09:00')}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                          title="Set to standard shift start"
-                        >
-                          09:00 AM
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="time"
-                        value={manualCheckInTime}
-                        onChange={(e) => setManualCheckInTime(e.target.value)}
-                        className="flex-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-800"
-                      />
-                      <button
-                        type="button"
-                        disabled={isSavingIn || !manualCheckInTime}
-                        onClick={handleSaveCheckIn}
-                        className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        {isSavingIn ? (
-                          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                        ) : (
-                          <span className="material-symbols-outlined text-[15px]">login</span>
-                        )}
-                        <span>Set Check In</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Check Out Manual Row */}
-                  <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/70 shadow-2xs">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                        <span>Check Out Time</span>
-                      </label>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setManualCheckOutTime(getCurrentTimeInput())}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                          title="Set to current time"
-                        >
-                          Now
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setManualCheckOutTime('18:00')}
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                          title="Set to standard shift end"
-                        >
-                          06:00 PM
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="time"
-                        value={manualCheckOutTime}
-                        onChange={(e) => setManualCheckOutTime(e.target.value)}
-                        className="flex-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-800"
-                      />
-                      <button
-                        type="button"
-                        disabled={isSavingOut || !manualCheckOutTime}
-                        onClick={handleSaveCheckOut}
-                        className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 active:scale-95 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        {isSavingOut ? (
-                          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                        ) : (
-                          <span className="material-symbols-outlined text-[15px]">logout</span>
-                        )}
-                        <span>Set Check Out</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Break Time Correction — for an employee who forgot to resume work */}
-                {(
-                  <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/80">
-                    <div className="flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[16px] text-red-600">free_breakfast</span>
-                      <span className="text-[11px] font-bold text-slate-800 uppercase tracking-wider">Break Time</span>
-                    </div>
-
-                    {!selectedRecord.hasCheckedIn && (
-                      <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-[11px] text-slate-500 leading-relaxed">
-                        No check-in on this date. Set the check-in time above first, then enter the break.
-                      </div>
-                    )}
-
-                    {selectedRecord.isOnBreak && (
-                      <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
-                        <span className="font-bold">Still on break</span>
-                        {selectedRecord.breakStartedAt ? ` since ${formatTime(selectedRecord.breakStartedAt)}` : ''}. If they
-                        forgot to select Resume Work, enter their actual break below. Saving ends the break so
-                        they can work and check out normally.
-                      </div>
-                    )}
-
-                    <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/70 shadow-2xs">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-[11px] font-bold text-slate-700">
-                          Recorded break: <span className="text-slate-900">{fmtBreak(currentBreakMinutes)}</span>
-                        </span>
-                      </div>
-                      <div role="radiogroup" aria-label="Break correction" className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-slate-100">
-                        {([['set', 'Set total'], ['add', 'Add'], ['subtract', 'Subtract']] as const).map(([mode, label]) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            role="radio"
-                            aria-checked={breakMode === mode}
-                            onClick={() => setBreakMode(mode)}
-                            className={`py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
-                              breakMode === mode ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-[11px] font-bold text-slate-700">
-                          {breakMode === 'set' ? 'Actual total break for the day' : breakMode === 'add' ? 'Minutes to add' : 'Minutes to remove'}
-                        </label>
-                        <div className="flex items-center gap-1">
-                          {(breakMode === 'set' ? [30, 45, 60] : [15, 30, 60]).map((mins) => (
-                            <button
-                              key={mins}
-                              type="button"
-                              onClick={() => { setBreakHours(String(Math.floor(mins / 60))); setBreakMins(String(mins % 60)) }}
-                              className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
-                            >
-                              {mins === 60 ? '1h' : `${mins}m`}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 flex items-center gap-1.5">
-                          <input
-                            type="number" min={0} max={12} inputMode="numeric" aria-label="Break hours"
-                            value={breakHours}
-                            onChange={(e) => setBreakHours(e.target.value)}
-                            className="w-16 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-800"
-                          />
-                          <span className="text-[11px] font-semibold text-slate-500">h</span>
-                          <input
-                            type="number" min={0} max={59} inputMode="numeric" aria-label="Break minutes"
-                            value={breakMins}
-                            onChange={(e) => setBreakMins(e.target.value)}
-                            className="w-16 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-800"
-                          />
-                          <span className="text-[11px] font-semibold text-slate-500">min</span>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={isSavingBreak || !breakInputValid || !selectedRecord.hasCheckedIn}
-                          onClick={handleSaveBreak}
-                          className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 active:scale-95 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1 shrink-0 cursor-pointer"
-                        >
-                          {isSavingBreak ? (
-                            <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                          ) : (
-                            <span className="material-symbols-outlined text-[15px]">save</span>
-                          )}
-                          <span>{selectedRecord.isOnBreak ? 'End Break & Save' : breakMode === 'set' ? 'Set Break' : breakMode === 'add' ? 'Add' : 'Subtract'}</span>
-                        </button>
-                      </div>
-                      <span className={`text-[10px] ${newBreakTotal < 0 ? 'text-red-600 font-semibold' : 'text-slate-400'}`}>
-                        {newBreakTotal < 0
-                          ? `Only ${fmtBreak(currentBreakMinutes)} is recorded — that much can't be removed.`
-                          : `${fmtBreak(currentBreakMinutes)} → ${fmtBreak(newBreakTotal)} for the day. Worked hours are recalculated.`}
-                      </span>
-                    </div>
-                  </div>
+                {/* Check in / check out / break correction for the selected date */}
+                {token && (
+                  <AttendanceDayEditor
+                    token={token}
+                    employeeDbId={selectedRecord.employeeDbId}
+                    employeeName={selectedRecord.employeeName}
+                    date={selectedDate}
+                    rawCheckIn={selectedRecord.rawCheckIn}
+                    rawCheckOut={selectedRecord.rawCheckOut}
+                    breakMinutes={selectedRecord.breakMinutes ?? (selectedRecord.totalBreakSeconds ? selectedRecord.totalBreakSeconds / 60 : 0)}
+                    isOnBreak={selectedRecord.isOnBreak}
+                    breakStartedAt={selectedRecord.breakStartedAt}
+                    onSaved={loadAttendance}
+                    onMessage={(type, message) => setToast({ type, message })}
+                  />
                 )}
 
                 {/* Past Records Section Label */}

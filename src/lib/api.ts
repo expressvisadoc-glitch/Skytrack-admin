@@ -1479,6 +1479,10 @@ export interface MonthlyAttendanceDay {
   checkOut: string
   rawCheckIn?: string | null
   rawCheckOut?: string | null
+  /** The check-out actually recorded, never an assumed end of shift */
+  recordedCheckOut?: string | null
+  /** A break was started and never ended */
+  isOnBreak?: boolean
   breakMinutes: number
   breakFormatted: string
   workedMinutes: number
@@ -1686,6 +1690,9 @@ export async function getEmployeeMonthlyAttendance(
           checkOut: formattedCheckOut,
           rawCheckIn: att.check_in,
           rawCheckOut: effectiveCheckOutIso,
+          // Older servers only send the effective check-out, which may be an assumed end of shift
+          recordedCheckOut: 'recorded_check_out' in att ? (att.recorded_check_out ?? null) : (att.check_out ?? null),
+          isOnBreak: Boolean(att.break_started_at && !att.check_out),
           breakMinutes: breakMins,
           breakFormatted,
           workedMinutes,

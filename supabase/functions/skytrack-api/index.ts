@@ -3789,6 +3789,9 @@ async function handleAttendanceMonthly(
           logout: formatTime(effectiveCheckOut ?? null),
           check_in: att?.check_in ?? null,
           check_out: effectiveCheckOut ?? null,
+          // What is actually stored, for admin correction screens (check_out above may be an assumed end of shift)
+          recorded_check_out: att?.check_out ?? null,
+          break_started_at: att?.break_started_at ?? null,
           hours: formatDuration(activeMinutes),
           active_formatted: formatDuration(activeMinutes),
           breakFormatted: formatDuration(Math.round(rowBreakSec / 60)),

@@ -5,6 +5,7 @@ import {
   type EmployeeMonthlyAttendanceResult,
   type MonthlyAttendanceDay,
 } from '../lib/api'
+import { AttendanceDayEditor } from './AttendanceDayEditor'
 
 interface EmployeeOption {
   id: string
@@ -41,6 +42,8 @@ export function EmployeeAttendanceHistory({
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('All')
+  // The day whose check in / check out / break is being corrected
+  const [editingDate, setEditingDate] = useState<string | null>(null)
 
   // Keep track of current employee if prop changes
   useEffect(() => {
@@ -88,6 +91,10 @@ export function EmployeeAttendanceHistory({
       onSelectEmployee(newEmpId)
     }
   }
+
+  // Today in the office timezone; future days cannot be edited
+  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
+  const editingDay = editingDate ? attendanceData?.days.find((d) => d.date === editingDate) ?? null : null
 
   // Filter days based on search and status filter
   const filteredDays = useMemo(() => {
@@ -549,12 +556,13 @@ export function EmployeeAttendanceHistory({
                   <th className="py-3 px-4">BREAK</th>
                   <th className="py-3 px-4">WORKED HOURS</th>
                   <th className="py-3 px-6">REMARKS / NOTES</th>
+                  <th className="py-3 px-4 text-right">EDIT</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="py-16 text-center text-slate-400">
+                    <td colSpan={8} className="py-16 text-center text-slate-400">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <span className="w-6 h-6 rounded-full bg-red-500 animate-ping"></span>
                         <p className="text-slate-500 font-semibold text-xs">
@@ -565,7 +573,7 @@ export function EmployeeAttendanceHistory({
                   </tr>
                 ) : filteredDays.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-400 font-medium text-xs">
+                    <td colSpan={8} className="py-12 text-center text-slate-400 font-medium text-xs">
                       No attendance records found for this period.
                     </td>
                   </tr>
@@ -728,6 +736,22 @@ export function EmployeeAttendanceHistory({
                             <span className="text-slate-300">—</span>
                           )}
                         </td>
+
+                        {/* Edit this day */}
+                        <td className="py-3.5 px-4 whitespace-nowrap text-right">
+                          {row.status !== 'upcoming' && row.date <= todayIso && (
+                            <button
+                              type="button"
+                              data-edit-day={row.date}
+                              onClick={() => setEditingDate(row.date)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-red-300 text-[11px] font-bold text-slate-600 transition-colors cursor-pointer"
+                              title="Correct check in, check out or break for this day"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">edit</span>
+                              Edit
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     )
                   })
@@ -747,6 +771,42 @@ export function EmployeeAttendanceHistory({
           </div>
         </div>
       </div>
+
+      {/* Correct one day: check in, check out and break */}
+      {editingDay && token && attendanceData && (
+        <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true"
+          aria-label={`Edit attendance for ${editingDay.date}`}>
+          <div className="absolute inset-0 bg-slate-900/40" onClick={() => setEditingDate(null)} />
+          <div className="relative w-full max-w-md h-full overflow-y-auto bg-white shadow-2xl p-5 flex flex-col gap-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-[15px] font-bold text-slate-900 truncate">{attendanceData.employee.name}</h3>
+                <p className="text-[12px] text-slate-500">
+                  {new Date(editingDay.date + 'T12:00:00').toLocaleDateString('en-GB', {
+                    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+                  })}
+                  {' · '}{editingDay.statusLabel}
+                </p>
+              </div>
+              <button type="button" onClick={() => setEditingDate(null)} aria-label="Close"
+                className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-500 flex items-center justify-center cursor-pointer shrink-0">
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+            <AttendanceDayEditor
+              token={token}
+              employeeDbId={attendanceData.employee.id}
+              employeeName={attendanceData.employee.name}
+              date={editingDay.date}
+              rawCheckIn={editingDay.rawCheckIn}
+              rawCheckOut={editingDay.recordedCheckOut ?? null}
+              breakMinutes={editingDay.breakMinutes}
+              isOnBreak={editingDay.isOnBreak}
+              onSaved={loadData}
+            />
+          </div>
+        </div>
+      )}
     </main>
   )
 }
