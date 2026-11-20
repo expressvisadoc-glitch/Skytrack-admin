@@ -442,7 +442,7 @@ async function handleRequest(req: Request): Promise<Response> {
     }
 
     if (action === "leave_balance") {
-      return await handleLeaveBalance(employee);
+      return await handleLeaveBalance(employee, body);
     }
 
     if (action === "leave_submit") {
@@ -3053,8 +3053,36 @@ async function handleCancelLeave(
 // =============================================================
 
 async function handleLeaveBalance(
-  employee: any
+  employee: any,
+  body: any = {}
 ) {
+  // Admins may ask for one employee's balance (Employee Details page). Everyone else always gets
+  // their own: before this, the requested employee was ignored and admins saw THEIR OWN balance
+  // on every employee's page, so approvals and adjustments never appeared to change it.
+  let target: any = employee;
+  const requested = String(body?.employeeId ?? body?.employee_id ?? "").trim();
+  const role = String(employee?.role || "").toLowerCase();
+  if (
+    requested &&
+    requested !== employee.id &&
+    requested !== employee.employee_id &&
+    (role === "admin" || role === "super_admin")
+  ) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requested);
+    const { data: found, error: findError } = await adminClient
+      .from("employees")
+      .select("id, employee_id, reporting_manager_id")
+      .eq(isUuid ? "id" : "employee_id", requested)
+      .maybeSingle();
+    if (findError) {
+      return json({ success: false, error: "leave_balance_error", message: "Unable to load leave balance.", details: findError.message }, 500);
+    }
+    if (!found) {
+      return json({ success: false, error: "employee_not_found", message: "Employee not found." }, 404);
+    }
+    target = found;
+  }
+
   const {
     data,
     error
@@ -3069,7 +3097,7 @@ async function handleLeaveBalance(
     `)
     .eq(
       "employee_id",
-      employee.id
+      target.id
     );
 
   if (error) {
@@ -3101,7 +3129,7 @@ async function handleLeaveBalance(
         "sick"
     );
 
-  const managerName = await resolveReportingManagerName(employee.reporting_manager_id);
+  const managerName = await resolveReportingManagerName(target.reporting_manager_id);
 
   return json({
     success: true,
@@ -3121,8 +3149,8 @@ async function handleLeaveBalance(
     manager_name: managerName || null,
     reportingManager: managerName || null,
     reporting_manager_name: managerName || null,
-    reportingManagerId: employee.reporting_manager_id || null,
-    reporting_manager_id: employee.reporting_manager_id || null
+    reportingManagerId: target.reporting_manager_id || null,
+    reporting_manager_id: target.reporting_manager_id || null
   });
 }
 
