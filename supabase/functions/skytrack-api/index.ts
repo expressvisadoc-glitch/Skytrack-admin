@@ -395,19 +395,19 @@ async function handleRequest(req: Request): Promise<Response> {
     }
 
     if (action === "start_work") {
-      return await handleStartWork(employee);
+      return await handleStartWork(employee, body);
     }
 
     if (action === "end_work") {
-      return await handleEndWork(employee);
+      return await handleEndWork(employee, body);
     }
 
     if (action === "start_break") {
-      return await handleStartBreak(employee);
+      return await handleStartBreak(employee, body);
     }
 
     if (action === "resume_work" || action === "end_break") {
-      return await handleResumeWork(employee);
+      return await handleResumeWork(employee, body);
     }
 
     if (action === "attendance_monthly") {
@@ -1002,8 +1002,13 @@ async function handleAttendanceToday(
 // =============================================================
 
 async function handleStartWork(
-  employee: any
+  employee: any,
+  body: any = {}
 ) {
+  // Offline taps arrive late: record them at the time the employee tapped
+  const tap = readTapTime(body);
+  if (tap.stale) return staleTapResponse();
+
   const {
     data,
     error
@@ -1037,7 +1042,7 @@ async function handleStartWork(
     );
   }
 
-  const attendance =
+  let attendance =
     data?.[0] ?? null;
 
   if (!attendance) {
@@ -1052,6 +1057,8 @@ async function handleStartWork(
       500
     );
   }
+
+  attendance = await applyTapTime("start_work", attendance, tap.time);
 
   const totalBreakSec = attendance.total_break_seconds ?? (attendance.break_minutes ? attendance.break_minutes * 60 : 0);
 
@@ -1099,8 +1106,13 @@ async function handleStartWork(
 // =============================================================
 
 async function handleEndWork(
-  employee: any
+  employee: any,
+  body: any = {}
 ) {
+  // Offline taps arrive late: record them at the time the employee tapped
+  const tap = readTapTime(body);
+  if (tap.stale) return staleTapResponse();
+
   const {
     data,
     error
@@ -1136,7 +1148,7 @@ async function handleEndWork(
     );
   }
 
-  const attendance =
+  let attendance =
     data?.[0] ?? null;
 
   if (!attendance) {
@@ -1164,6 +1176,8 @@ async function handleEndWork(
       500
     );
   }
+
+  attendance = await applyTapTime("end_work", attendance, tap.time);
 
   const totalBreakSec = attendance.total_break_seconds ?? (attendance.break_minutes ? attendance.break_minutes * 60 : 0);
 
@@ -1211,8 +1225,13 @@ async function handleEndWork(
 // =============================================================
 
 async function handleStartBreak(
-  employee: any
+  employee: any,
+  body: any = {}
 ) {
+  // Offline taps arrive late: record them at the time the employee tapped
+  const tap = readTapTime(body);
+  if (tap.stale) return staleTapResponse();
+
   const {
     data,
     error
@@ -1240,7 +1259,7 @@ async function handleStartBreak(
     );
   }
 
-  const attendance =
+  let attendance =
     data?.[0];
 
   if (!attendance) {
@@ -1253,6 +1272,8 @@ async function handleStartBreak(
       400
     );
   }
+
+  attendance = await applyTapTime("start_break", attendance, tap.time);
 
   const totalBreakSec = attendance.total_break_seconds ?? (attendance.break_minutes ? attendance.break_minutes * 60 : 0);
 
@@ -1288,8 +1309,13 @@ async function handleStartBreak(
 // =============================================================
 
 async function handleResumeWork(
-  employee: any
+  employee: any,
+  body: any = {}
 ) {
+  // Offline taps arrive late: record them at the time the employee tapped
+  const tap = readTapTime(body);
+  if (tap.stale) return staleTapResponse();
+
   const {
     data,
     error
@@ -1317,7 +1343,7 @@ async function handleResumeWork(
     );
   }
 
-  const attendance =
+  let attendance =
     data?.[0];
 
   if (!attendance) {
@@ -1330,6 +1356,8 @@ async function handleResumeWork(
       400
     );
   }
+
+  attendance = await applyTapTime("resume_work", attendance, tap.time);
 
   const totalBreakSec = attendance.total_break_seconds ?? (attendance.break_minutes ? attendance.break_minutes * 60 : 0);
 
@@ -1358,6 +1386,136 @@ async function handleResumeWork(
         attendance.status
     }
   });
+}
+
+// =============================================================
+// OFFLINE TAPS: RECORD THE TIME THE EMPLOYEE TAPPED
+// The app saves each check-in / break / check-out tap on the phone and sends it when it has a
+// network, with "clientTime" (when it was tapped) and "clientSentAt" (the phone's clock when sent,
+// used to correct a phone whose clock is wrong). The attendance functions stamp the server's time;
+// applyTapTime moves that stamp back to the tap. Older apps send neither field: nothing changes.
+// =============================================================
+
+const TAP_MIN_DELAY_MS = 60 * 1000;        // sent within a minute: the server time is good enough
+const TAP_MAX_FUTURE_MS = 2 * 60 * 1000;   // tolerance for small clock differences
+
+function officeDate(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(d);
+}
+
+function readTapTime(body: any, now: Date = new Date()): { time: Date | null; stale: boolean } {
+  const raw = body?.clientTime ?? body?.client_time;
+  if (raw === undefined || raw === null || raw === "") return { time: null, stale: false };
+  let tapped = new Date(String(raw));
+  if (Number.isNaN(tapped.getTime())) return { time: null, stale: false };
+
+  // Phone clock off by some minutes or hours: shift the tap by the same amount
+  const sentRaw = body?.clientSentAt ?? body?.client_sent_at;
+  const sent = sentRaw ? new Date(String(sentRaw)) : null;
+  if (sent && !Number.isNaN(sent.getTime())) {
+    tapped = new Date(tapped.getTime() + (now.getTime() - sent.getTime()));
+  }
+
+  if (tapped.getTime() > now.getTime() + TAP_MAX_FUTURE_MS) return { time: null, stale: false };
+  if (officeDate(tapped) !== officeDate(now)) return { time: null, stale: true };
+  if (now.getTime() - tapped.getTime() < TAP_MIN_DELAY_MS) return { time: null, stale: false };
+  return { time: tapped, stale: false };
+}
+
+function staleTapResponse(): Response {
+  return json({
+    success: false,
+    error: "action_date_passed",
+    message: "This was tapped on an earlier day while offline and can't be added to today. Ask your admin to correct that day."
+  }, 409);
+}
+
+function ms(value: unknown): number | null {
+  if (!value) return null;
+  const t = new Date(String(value)).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+/**
+ * Moves the time the attendance function just recorded back to the tap. Only ever moves it
+ * earlier, never before the previous step (check-in, the previous break), so totals stay valid.
+ * Best effort: if anything fails, the server's own time stays.
+ */
+async function applyTapTime(action: string, attendance: any, tapped: Date | null): Promise<any> {
+  if (!tapped || !attendance) return attendance;
+  try {
+    let row = attendance;
+    if (!row.id) {
+      const { data } = await adminClient.from("attendance").select("*")
+        .eq("employee_id", attendance.employee_id).eq("attendance_date", attendance.attendance_date).maybeSingle();
+      if (!data) return attendance;
+      row = data;
+    }
+    const tap = tapped.getTime();
+    const tapIso = tapped.toISOString();
+    const checkIn = ms(row.check_in);
+    const nowIso = new Date().toISOString();
+    const breakSec = Number(row.total_break_seconds ?? (row.break_minutes ? row.break_minutes * 60 : 0)) || 0;
+
+    // Latest break row, to keep a correction from overlapping an earlier break
+    const { data: breaks } = await adminClient.from("attendance_breaks")
+      .select("id, break_start, break_end, break_minutes")
+      .eq("attendance_id", row.id).order("break_start", { ascending: false }).limit(2);
+    const latest = breaks?.[0] ?? null;
+
+    let patch: Record<string, unknown> | null = null;
+
+    if (action === "start_work") {
+      const recorded = checkIn;
+      if (recorded !== null && tap < recorded) patch = { check_in: tapIso };
+    } else if (action === "end_work") {
+      const recorded = ms(row.check_out);
+      const lastBreakEnd = ms(latest?.break_end);
+      const floor = Math.max(checkIn ?? 0, lastBreakEnd ?? 0);
+      if (recorded !== null && tap < recorded && tap > floor && checkIn !== null) {
+        const worked = Math.max(0, Math.floor((tap - checkIn) / 60000) - Math.round(breakSec / 60));
+        patch = { check_out: tapIso, worked_minutes: worked };
+      }
+    } else if (action === "start_break") {
+      const recorded = ms(row.break_started_at);
+      const previousEnd = ms(breaks?.[1]?.break_end);
+      const floor = Math.max(checkIn ?? 0, previousEnd ?? 0);
+      if (recorded !== null && tap < recorded && tap >= floor) {
+        patch = { break_started_at: tapIso };
+        if (latest && !latest.break_end) {
+          await adminClient.from("attendance_breaks").update({ break_start: tapIso, updated_at: nowIso }).eq("id", latest.id);
+        }
+      }
+    } else if (action === "resume_work") {
+      const start = ms(latest?.break_start);
+      const end = ms(latest?.break_end);
+      if (latest && start !== null && end !== null && tap < end && tap >= start) {
+        const removedSec = Math.round((end - tap) / 1000);
+        const total = Math.max(0, breakSec - removedSec);
+        await adminClient.from("attendance_breaks").update({
+          break_end: tapIso,
+          break_minutes: Math.round((tap - start) / 60000),
+          updated_at: nowIso
+        }).eq("id", latest.id);
+        patch = { total_break_seconds: total, break_minutes: Math.round(total / 60) };
+      }
+    }
+
+    if (!patch) return row;
+    const { data: updated, error } = await adminClient.from("attendance")
+      .update({ ...patch, updated_at: nowIso }).eq("id", row.id).select().single();
+    if (error) {
+      console.error(`applyTapTime ${action} error:`, error);
+      return row;
+    }
+    console.log(`applyTapTime: ${action} for attendance ${row.id} recorded at ${tapIso}`);
+    return updated ?? row;
+  } catch (err) {
+    console.error(`applyTapTime ${action} failed:`, err);
+    return attendance;
+  }
 }
 
 function isPast1159(dateString: string): boolean {
